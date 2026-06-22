@@ -1,0 +1,11 @@
+# compiled binaries / build output
+/fleet
+/fleet.exe
+/dist/
+
+# go
+*.test
+*.out
+
+# os
+.DS_Store
