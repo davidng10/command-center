@@ -1,8 +1,7 @@
 {
-  "branchPattern": "task/SP-{ticket}-{name}",
   "baseBranches": ["main", "develop"],
   "defaultBase": "main",
-  "worktreeName": "{repo}-{ticket}",
+  "worktreeName": "{repo}-{branch}",
   "copyFiles": [".env", ".env.local"],
   "install": true,
   "launch": "claude",

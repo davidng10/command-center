@@ -22,26 +22,18 @@ var (
 // Plan is the fully-resolved result of the user's answers — pure data, so it
 // can be unit-tested without any TUI.
 type Plan struct {
-	Ticket       string
-	Name         string
 	Branch       string
 	WorktreeName string
 	WorktreePath string
 }
 
-// buildPlan derives the branch name and worktree location from raw input.
-func buildPlan(repo RepoContext, cfg Config, ticketRaw, nameRaw string) Plan {
-	ticket := normalizeTicket(ticketRaw)
-	name := slugify(nameRaw)
-	branch := applyTemplate(cfg.BranchPattern, map[string]string{
-		"ticket": ticket, "name": name,
-	})
+// buildPlan derives the worktree location from the user-supplied branch name.
+func buildPlan(repo RepoContext, cfg Config, branchRaw string) Plan {
+	branch := sanitizeBranch(branchRaw)
 	wtName := applyTemplate(cfg.WorktreeName, map[string]string{
-		"repo": repo.Name, "ticket": ticket, "name": name, "branch": slugify(branch),
+		"repo": repo.Name, "branch": slugify(branch),
 	})
 	return Plan{
-		Ticket:       ticket,
-		Name:         name,
 		Branch:       branch,
 		WorktreeName: wtName,
 		WorktreePath: filepath.Join(repo.Parent, wtName),
@@ -93,14 +85,12 @@ func runNew() error {
 	}
 	cfg := loadConfig(repo.Root)
 
-	var ticketRaw, nameRaw string
+	var branchRaw string
 	base := cfg.DefaultBase
 
 	intake := huh.NewForm(huh.NewGroup(
-		huh.NewInput().Title("JIRA ticket?").Placeholder("SP-1234").
-			Value(&ticketRaw).Validate(required),
-		huh.NewInput().Title("Short name?").Placeholder("login fix").
-			Value(&nameRaw).Validate(required),
+		huh.NewInput().Title("Branch name?").Placeholder("task/SP-1234-login-fix").
+			Value(&branchRaw).Validate(required),
 		huh.NewSelect[string]().Title("Base branch?").
 			Options(huh.NewOptions(cfg.BaseBranches...)...).Value(&base),
 	))
@@ -108,7 +98,7 @@ func runNew() error {
 		return formErr(err)
 	}
 
-	p := buildPlan(repo, cfg, ticketRaw, nameRaw)
+	p := buildPlan(repo, cfg, branchRaw)
 	if _, err := os.Stat(p.WorktreePath); err == nil {
 		return fmt.Errorf("folder already exists: %s", p.WorktreePath)
 	}

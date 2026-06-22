@@ -45,15 +45,14 @@ func printHelp() {
     $ %[1]s --version
 
   %[1]s --new walks you through:
-    1. JIRA ticket   (e.g. SP-1234)
-    2. Short name    (e.g. login fix)
-    3. Base branch   (main / develop)
+    1. Branch name   (e.g. task/SP-1234-login-fix)
+    2. Base branch   (main / develop)
 
-  ...then creates  task/SP-1234-login-fix  in a sibling folder, copies your
+  ...then creates that branch in a sibling worktree folder, copies your
   gitignored env files, installs dependencies, and drops you into claude.
 
   Per-repo config: drop a .ccrc.json at a repo root to override defaults
-  (branchPattern, baseBranches, copyFiles, install, launch, ...).
+  (baseBranches, worktreeName, copyFiles, install, launch, ...).
   See .ccrc.example.json.
 
 `, appName)

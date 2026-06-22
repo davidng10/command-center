@@ -32,7 +32,7 @@ func TestCreateWorktreeEndToEnd(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.Fetch = false // no remote in the sandbox
 
-	p := buildPlan(repo, cfg, "SP-1234", "login fix")
+	p := buildPlan(repo, cfg, "task/SP-1234-login fix")
 	if p.Branch != "task/SP-1234-login-fix" {
 		t.Fatalf("unexpected branch %q", p.Branch)
 	}

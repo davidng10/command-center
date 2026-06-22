@@ -10,10 +10,8 @@ Supports:
 ```
 $ fleet --new
 
-┃ JIRA ticket?
-┃ SP-1234
-┃ Short name?
-┃ login fix
+┃ Branch name?
+┃ task/SP-1234-login-fix
 ┃ Base branch?
 ┃ > main
 ┃   develop
@@ -21,14 +19,14 @@ $ fleet --new
 ┃ Will create
 ┃ branch  task/SP-1234-login-fix
 ┃ base    origin/main
-┃ folder  ~/Documents/gitlab/product-catalog-1234
+┃ folder  ~/Documents/gitlab/product-catalog-task-sp-1234-login-fix
 ┃ Create this worktree? (Y/n)
 
-✓ worktree at ~/Documents/product-catalog-1234
+✓ worktree at ~/Documents/product-catalog-task-sp-1234-login-fix
 ✓ copied: .env, .env.local
 ✓ dependencies installed (pnpm)
 
-Ready. launching claude in product-catalog-1234 …
+Ready. launching claude in product-catalog-task-sp-1234-login-fix …
 ```
 
 It then drops you into `claude` inside the new worktree. Open a second
@@ -43,7 +41,7 @@ Most devs work on one repo and on one branch at a time. Worktrees lets one repo 
 several folders checked out to different branches at once, all sharing the same
 `.git` history. Agent A edits folder A on its branch; agent B edits folder B on
 its branch. They never step on each other. `fleet --new` automates creating one
-of those folders + a branch named the way your team names them.
+of those folders + a branch you name yourself, however your team names branches.
 
 ---
 
@@ -90,7 +88,7 @@ release, run `./build.sh v1.2.3` and upload `dist/*` to a GitHub Release.
 ## Usage
 
 ```bash
-fleet --new        # interactive: ticket → name → base branch → create + launch
+fleet --new        # interactive: branch name → base branch → create + launch
 fleet --help
 fleet --version
 ```
@@ -107,19 +105,20 @@ Defaults live in [`config.go`](config.go). Override them **per repo** by
 dropping a `.ccrc.json` at that repo's root (copy
 [`.ccrc.example.json`](.ccrc.example.json)):
 
-| key             | default                       | meaning                                                                 |
-| --------------- | ----------------------------- | ----------------------------------------------------------------------- |
-| `branchPattern` | `task/SP-{ticket}-{name}`     | branch template. Tokens: `{ticket}`, `{name}`                           |
-| `baseBranches`  | `["main", "develop"]`         | branches offered to fork from                                           |
-| `defaultBase`   | `main`                        | pre-selected base                                                       |
-| `worktreeName`  | `{repo}-{ticket}`             | sibling folder name. Tokens: `{repo}`, `{ticket}`, `{name}`, `{branch}` |
-| `copyFiles`     | `[".env", ".env.local", ...]` | gitignored files copied into the worktree                               |
-| `install`       | `true`                        | run the package manager after creating the worktree                     |
-| `launch`        | `claude`                      | command run in the worktree when done (`""` to skip)                    |
-| `fetch`         | `true`                        | `git fetch` the base before forking so it's fresh                       |
+| key            | default                       | meaning                                                       |
+| -------------- | ----------------------------- | ------------------------------------------------------------- |
+| `baseBranches` | `["main", "develop"]`         | branches offered to fork from                                 |
+| `defaultBase`  | `main`                        | pre-selected base                                             |
+| `worktreeName` | `{repo}-{branch}`             | sibling folder name. Tokens: `{repo}`, `{branch}` (slugified) |
+| `copyFiles`    | `[".env", ".env.local", ...]` | gitignored files copied into the worktree                     |
+| `install`      | `true`                        | run the package manager after creating the worktree           |
+| `launch`       | `claude`                      | command run in the worktree when done (`""` to skip)          |
+| `fetch`        | `true`                        | `git fetch` the base before forking so it's fresh             |
 
-The ticket you type is normalized — both `SP-1234` and `1234` become `1234`,
-then `branchPattern` re-adds the `SP-` prefix → `task/SP-1234-login-fix`.
+You name the branch yourself, however your team names branches — the only
+normalization is that surrounding/internal whitespace collapses to dashes
+(`login fix` → `login-fix`). The worktree folder name is the slugified branch
+(`task/SP-1234-login-fix` → `product-catalog-task-sp-1234-login-fix`).
 Package manager is auto-detected from the lockfile (pnpm/yarn/bun/npm).
 
 ---
@@ -128,8 +127,8 @@ Package manager is auto-detected from the lockfile (pnpm/yarn/bun/npm).
 
 ```bash
 git worktree list                              # see all worktrees
-git worktree remove ../product-catalog-1234    # delete the folder
-git branch -d task/SP-1234-login-fix           # (optional) drop the local branch
+git worktree remove ../product-catalog-task-sp-1234-login-fix   # delete the folder
+git branch -d task/SP-1234-login-fix                            # (optional) drop the local branch
 ```
 
 ---
@@ -143,7 +142,7 @@ command-center/
 ├── config.go          # defaults + .ccrc.json loading
 ├── git.go             # git repo detection + exec helpers
 ├── pkg.go             # package-manager detection
-├── util.go            # slugify / ticket / template helpers
+├── util.go            # slugify / branch-sanitize / template helpers
 ├── *_test.go          # unit + end-to-end worktree tests
 ├── build.sh           # cross-compile every platform → dist/
 ├── install.sh         # macOS/Linux/WSL installer

@@ -8,12 +8,12 @@ import (
 var (
 	reNonAlnum   = regexp.MustCompile(`[^a-z0-9]+`)
 	reEdgeDashes = regexp.MustCompile(`^-+|-+$`)
-	reSPPrefix   = regexp.MustCompile(`(?i)^sp[-\s]?`)
-	reNonAlnumI  = regexp.MustCompile(`(?i)[^a-z0-9]`)
+	reSpace      = regexp.MustCompile(`\s+`)
 	reToken      = regexp.MustCompile(`\{(\w+)\}`)
 )
 
-// slugify: "Login Fix!" -> "login-fix"
+// slugify: "Login Fix!" -> "login-fix". Used to turn a branch name (which may
+// contain slashes and mixed case) into a filesystem-safe worktree folder name.
 func slugify(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	s = reNonAlnum.ReplaceAllString(s, "-")
@@ -21,14 +21,12 @@ func slugify(s string) string {
 	return s
 }
 
-// normalizeTicket strips a leading "SP-"/"SP" and any non-alphanumerics so both
-// "SP-1234" and "1234" normalize to "1234". The prefix is re-added via the
-// branch pattern.
-func normalizeTicket(s string) string {
-	s = strings.TrimSpace(s)
-	s = reSPPrefix.ReplaceAllString(s, "")
-	s = reNonAlnumI.ReplaceAllString(s, "")
-	return s
+// sanitizeBranch trims the input and collapses internal whitespace to single
+// dashes ("login fix" -> "login-fix"). The branch is otherwise used verbatim,
+// so the user keeps full control over naming — slashes, case, and any ticket
+// convention their team uses.
+func sanitizeBranch(s string) string {
+	return reSpace.ReplaceAllString(strings.TrimSpace(s), "-")
 }
 
 // applyTemplate fills "{token}" placeholders from vars; unknown tokens are left
