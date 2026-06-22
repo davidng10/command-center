@@ -14,7 +14,8 @@ type Config struct {
 	DefaultBase  string   `json:"defaultBase"`
 	WorktreeName string   `json:"worktreeName"`
 	CopyFiles    []string `json:"copyFiles"`
-	Install      bool     `json:"install"`
+	Install      bool     `json:"install"` // whether to offer a setup step at all
+	Setup        string   `json:"setup"`   // explicit setup command; overrides auto-detection when set
 	Launch       string   `json:"launch"`
 	Fetch        bool     `json:"fetch"`
 }

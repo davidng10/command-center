@@ -49,10 +49,10 @@ func printHelp() {
     2. Base branch   (main / develop)
 
   ...then creates that branch in a sibling worktree folder, copies your
-  gitignored env files, installs dependencies, and drops you into claude.
+  gitignored env files, runs your setup command, and drops you into claude.
 
   Per-repo config: drop a .ccrc.json at a repo root to override defaults
-  (baseBranches, worktreeName, copyFiles, install, launch, ...).
+  (baseBranches, worktreeName, copyFiles, install, setup, launch, ...).
   See .ccrc.example.json.
 
 `, appName)

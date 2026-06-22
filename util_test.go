@@ -7,9 +7,9 @@ import (
 
 func TestSlugify(t *testing.T) {
 	cases := map[string]string{
-		"Login Fix!":         "login-fix",
+		"Login Fix!":          "login-fix",
 		"  Add CSV   export ": "add-csv-export",
-		"already-kebab":      "already-kebab",
+		"already-kebab":       "already-kebab",
 	}
 	for in, want := range cases {
 		if got := slugify(in); got != want {

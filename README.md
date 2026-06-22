@@ -15,16 +15,23 @@ $ fleet --new
 ┃ Base branch?
 ┃ > main
 ┃   develop
+┃ Setup command?
+┃ > pnpm install  (detected)
+┃   npm ci
+┃   docker compose up -d --build
+┃   Custom…
+┃   Skip (no setup)
 
 ┃ Will create
 ┃ branch  task/SP-1234-login-fix
 ┃ base    origin/main
 ┃ folder  ~/Documents/gitlab/product-catalog-task-sp-1234-login-fix
+┃ setup   pnpm install
 ┃ Create this worktree? (Y/n)
 
 ✓ worktree at ~/Documents/product-catalog-task-sp-1234-login-fix
 ✓ copied: .env, .env.local
-✓ dependencies installed (pnpm)
+✓ setup complete (pnpm install)
 
 Ready. launching claude in product-catalog-task-sp-1234-login-fix …
 ```
@@ -111,7 +118,8 @@ dropping a `.ccrc.json` at that repo's root (copy
 | `defaultBase`  | `main`                        | pre-selected base                                             |
 | `worktreeName` | `{repo}-{branch}`             | sibling folder name. Tokens: `{repo}`, `{branch}` (slugified) |
 | `copyFiles`    | `[".env", ".env.local", ...]` | gitignored files copied into the worktree                     |
-| `install`      | `true`                        | run the package manager after creating the worktree           |
+| `install`      | `true`                        | whether to offer a setup step after creating the worktree     |
+| `setup`        | `""`                          | explicit setup command; overrides auto-detection when set     |
 | `launch`       | `claude`                      | command run in the worktree when done (`""` to skip)          |
 | `fetch`        | `true`                        | `git fetch` the base before forking so it's fresh             |
 
@@ -119,7 +127,29 @@ You name the branch yourself, however your team names branches — the only
 normalization is that surrounding/internal whitespace collapses to dashes
 (`login fix` → `login-fix`). The worktree folder name is the slugified branch
 (`task/SP-1234-login-fix` → `product-catalog-task-sp-1234-login-fix`).
-Package manager is auto-detected from the lockfile (pnpm/yarn/bun/npm).
+
+**Setup step.** A fresh worktree shares `.git` but not gitignored, per-folder
+state like `node_modules`, so JS projects need their dependencies installed
+before the worktree is usable. When creating a worktree, fleet shows a **setup
+command picker** — a short list of common commands plus *Custom…* and *Skip* —
+with a sensible option pre-selected. The pre-selection is resolved in order:
+
+1. an explicit `setup` in `.ccrc.json` (always wins), then
+2. **your last choice for this repo**, then
+3. auto-detection from the lockfile (`pnpm install`, `npm ci`, … — JS only).
+
+Whatever you pick (including *Skip*) is **remembered per repo**, so the next
+`fleet --new` in the same repo pre-selects it. That memory is a per-user cache
+at `~/.config/fleet/setups.json` (honoring `XDG_CONFIG_HOME`), keyed by the
+repo's absolute path — it never touches the repo itself. Detection only knows
+the JS ecosystem; for anything else just pick *Custom…* once (or pin it in
+`.ccrc.json`):
+
+```jsonc
+{ "setup": "uv sync" }                        // Python (uv / poetry / pip ...)
+{ "setup": "docker compose up -d --build" }   // local container dev
+{ "install": false }                          // never offer setup (e.g. Go — uses a shared module cache)
+```
 
 ---
 
@@ -141,7 +171,8 @@ command-center/
 ├── newcmd.go          # the `fleet --new` flow (huh forms + git steps)
 ├── config.go          # defaults + .ccrc.json loading
 ├── git.go             # git repo detection + exec helpers
-├── pkg.go             # package-manager detection
+├── pkg.go             # setup-command detection (JS package managers)
+├── cache.go           # per-repo setup-choice cache (~/.config/fleet)
 ├── util.go            # slugify / branch-sanitize / template helpers
 ├── *_test.go          # unit + end-to-end worktree tests
 ├── build.sh           # cross-compile every platform → dist/
