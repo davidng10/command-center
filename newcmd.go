@@ -42,16 +42,21 @@ func buildPlan(repo RepoContext, cfg Config, branchRaw string) Plan {
 }
 
 // resolveStartPoint prefers a fresh origin/<base>, falling back to the local
-// branch when there's no remote.
-func resolveStartPoint(repo RepoContext, cfg Config, base string) string {
+// branch when there's no remote. fetchErr is the (non-fatal) error from
+// refreshing origin/<base>; the caller should warn on it, since the resolved
+// start point may be stale when the fetch failed.
+func resolveStartPoint(repo RepoContext, cfg Config, base string) (string, error) {
 	startPoint := base
+	var fetchErr error
 	if cfg.Fetch {
-		_, _ = git(repo.Root, "fetch", "origin", base)
+		if out, err := git(repo.Root, "fetch", "origin", base); err != nil {
+			fetchErr = fmt.Errorf("%w: %s", err, out)
+		}
 		if gitOK(repo.Root, "rev-parse", "--verify", "origin/"+base) {
 			startPoint = "origin/" + base
 		}
 	}
-	return startPoint
+	return startPoint, fetchErr
 }
 
 // addWorktree creates the worktree + branch off startPoint.
@@ -122,7 +127,11 @@ func runNew() error {
 		return nil
 	}
 
-	startPoint := resolveStartPoint(repo, cfg, base)
+	startPoint, fetchErr := resolveStartPoint(repo, cfg, base)
+	if fetchErr != nil {
+		fmt.Printf("%s fetch failed, %s may be out of date: %v\n",
+			yellow.Render("!"), startPoint, fetchErr)
+	}
 	fmt.Printf("%s %s\n", dim.Render("base:"), startPoint)
 
 	if err := addWorktree(repo, p, startPoint); err != nil {

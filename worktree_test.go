@@ -37,7 +37,10 @@ func TestCreateWorktreeEndToEnd(t *testing.T) {
 		t.Fatalf("unexpected branch %q", p.Branch)
 	}
 
-	startPoint := resolveStartPoint(repo, cfg, "main")
+	startPoint, fetchErr := resolveStartPoint(repo, cfg, "main")
+	if fetchErr != nil {
+		t.Fatalf("unexpected fetch error: %v", fetchErr)
+	}
 	if startPoint != "main" {
 		t.Fatalf("startPoint = %q, want main", startPoint)
 	}
@@ -70,6 +73,35 @@ func TestCreateWorktreeEndToEnd(t *testing.T) {
 
 	// cleanup
 	run(t, root, "git", "worktree", "remove", p.WorktreePath)
+}
+
+// TestResolveStartPointFetchFailure verifies that a failed fetch is surfaced
+// (not swallowed) and that we still fall back to the local base branch.
+func TestResolveStartPointFetchFailure(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	tmp := t.TempDir()
+	root := filepath.Join(tmp, "no-remote")
+	mustMkdir(t, root)
+	run(t, root, "git", "init", "-q", "-b", "main")
+	run(t, root, "git", "config", "user.email", "t@t.co")
+	run(t, root, "git", "config", "user.name", "t")
+	mustWrite(t, filepath.Join(root, "f"), "x")
+	run(t, root, "git", "add", "f")
+	run(t, root, "git", "commit", "-qm", "init")
+
+	repo := RepoContext{Root: root, Name: "no-remote", Parent: tmp}
+	cfg := defaultConfig() // Fetch is true by default, but there is no 'origin'
+
+	startPoint, fetchErr := resolveStartPoint(repo, cfg, "main")
+	if fetchErr == nil {
+		t.Fatal("expected a fetch error when there is no origin remote")
+	}
+	if startPoint != "main" {
+		t.Fatalf("startPoint = %q, want fallback to local 'main'", startPoint)
+	}
 }
 
 func mustMkdir(t *testing.T, p string) {
