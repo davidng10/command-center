@@ -29,6 +29,19 @@ func sanitizeBranch(s string) string {
 	return reSpace.ReplaceAllString(strings.TrimSpace(s), "-")
 }
 
+// splitLaunch splits a launch command into the program name and its arguments
+// on whitespace, so a config like "code --wait" runs `code` with `--wait`
+// rather than looking for a binary literally named "code --wait". Returns an
+// empty name for a blank string. (Shell quoting is not interpreted; a launch
+// command needing quoted, space-containing args isn't supported.)
+func splitLaunch(cmd string) (string, []string) {
+	fields := strings.Fields(cmd)
+	if len(fields) == 0 {
+		return "", nil
+	}
+	return fields[0], fields[1:]
+}
+
 // applyTemplate fills "{token}" placeholders from vars; unknown tokens are left
 // untouched.
 func applyTemplate(tpl string, vars map[string]string) string {

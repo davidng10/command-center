@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestSlugify(t *testing.T) {
 	cases := map[string]string{
@@ -25,6 +28,29 @@ func TestSanitizeBranch(t *testing.T) {
 	for in, want := range cases {
 		if got := sanitizeBranch(in); got != want {
 			t.Errorf("sanitizeBranch(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestSplitLaunch(t *testing.T) {
+	cases := []struct {
+		in       string
+		wantName string
+		wantArgs []string
+	}{
+		{"claude", "claude", nil},
+		{"code --wait", "code", []string{"--wait"}},
+		{"  code   --wait  . ", "code", []string{"--wait", "."}},
+		{"", "", nil},
+		{"   ", "", nil},
+	}
+	for _, c := range cases {
+		name, args := splitLaunch(c.in)
+		if name != c.wantName {
+			t.Errorf("splitLaunch(%q) name = %q, want %q", c.in, name, c.wantName)
+		}
+		if !slices.Equal(args, c.wantArgs) {
+			t.Errorf("splitLaunch(%q) args = %v, want %v", c.in, args, c.wantArgs)
 		}
 	}
 }

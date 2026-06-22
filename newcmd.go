@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -148,7 +149,17 @@ func runNew() error {
 	if cfg.Launch != "" {
 		fmt.Printf("\n%s launching %s in %s …\n\n",
 			green.Render("Ready."), cyan.Render(cfg.Launch), p.WorktreeName)
-		_ = spawnInherit(p.WorktreePath, cfg.Launch) // hands over the terminal
+		name, args := splitLaunch(cfg.Launch)
+		// Hands over the terminal. A non-zero exit from the launched program is
+		// its own business (the user quitting claude is a clean exit for us),
+		// but failing to *start* it — a bad command or missing binary — is a
+		// real error worth surfacing instead of leaving the user with nothing.
+		if err := spawnInherit(p.WorktreePath, name, args...); err != nil {
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) {
+				return fmt.Errorf("launch %q failed: %w", cfg.Launch, err)
+			}
+		}
 	} else {
 		fmt.Printf("\n%s  cd %s\n", green.Render("Done."), p.WorktreePath)
 	}
