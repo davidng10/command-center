@@ -3,9 +3,14 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 
+	"command-center/internal/config"
 	"command-center/internal/provider"
 	"command-center/internal/provider/claude"
+	"command-center/internal/session"
 	"command-center/internal/tui"
 )
 
@@ -27,6 +32,8 @@ func main() {
 
 	switch cmd {
 	case "": // no args → the persistent TUI home
+		release := mustAcquireLock()
+		defer release()
 		exitOn(tui.Run(tui.Options{}))
 
 	case "hook": // `fleet hook <state>` — the Claude tracker writer (reads stdin)
@@ -40,6 +47,8 @@ func main() {
 		}
 
 	case "--new", "new": // back-compat shim: open the TUI straight into /new
+		release := mustAcquireLock()
+		defer release()
 		prefill := ""
 		if len(os.Args) > 2 {
 			prefill = os.Args[2]
@@ -47,6 +56,8 @@ func main() {
 		exitOn(tui.Run(tui.Options{StartWizard: true, PrefillBranch: prefill}))
 
 	case "setup": // re-run onboarding (provider + hook install)
+		release := mustAcquireLock()
+		defer release()
 		exitOn(tui.Run(tui.Options{ForceSetup: true}))
 
 	case "install": // CLI equivalent of onboarding's hook install
@@ -66,6 +77,31 @@ func main() {
 		printHelp()
 		os.Exit(1)
 	}
+}
+
+// mustAcquireLock ensures only one fleet TUI runs at a time. It writes the
+// current PID to ~/.config/fleet/fleet.pid after checking that any existing PID
+// is dead. If another instance is alive, it exits with a message.
+func mustAcquireLock() func() {
+	path, err := config.LockPath()
+	if err != nil {
+		return func() {} // can't resolve path — skip gracefully
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return func() {}
+	}
+
+	if data, err := os.ReadFile(path); err == nil {
+		if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil && pid > 0 {
+			if session.ProcessAlive(pid) {
+				fmt.Fprintf(os.Stderr, "fleet is already running (pid %d)\n", pid)
+				os.Exit(1)
+			}
+		}
+	}
+
+	_ = os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())), 0o644)
+	return func() { os.Remove(path) }
 }
 
 // installDefault installs the default provider's state integration.

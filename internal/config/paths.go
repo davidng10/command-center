@@ -42,6 +42,9 @@ func legacySetupsPath() (string, error) { return under("setups.json") }
 // activity files and the Claude tracker watches.
 func StateDir() (string, error) { return under("state") }
 
+// LockPath is ~/.config/fleet/fleet.pid — the single-instance pidfile.
+func LockPath() (string, error) { return under("fleet.pid") }
+
 func under(name string) (string, error) {
 	root, err := Root()
 	if err != nil {
