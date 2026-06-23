@@ -1,54 +1,47 @@
 # command center — `fleet`
 
-Agent parallelization management tool in CLI to spin up **isolated worktrees and run a fleet of
-parallel agents**
+A persistent TUI for running a **fleet of parallel coding agents**, each in its
+own isolated git worktree. `fleet` is a long-running program (like Claude Code
+itself): a home dashboard of every agent session and its **live status**, with a
+`/new` wizard to spin up more.
 
 Supports:
 
-1. [Claude Code](https://claude.com/claude-code)
+1. [Claude Code](https://claude.com/claude-code) (more providers planned — the
+   core is provider-agnostic)
 
 ```
-$ fleet --new
+▌ fleet  ~/Documents/gitlab/platform-server
 
-┃ Branch name?
-┃ task/SP-1234-login-fix
-┃ Base branch?
-┃ > main
-┃   develop
-┃ Setup command?
-┃ > pnpm install  (detected)
-┃   npm ci
-┃   docker compose up -d --build
-┃   Custom…
-┃   Skip (no setup)
+● Active sessions (3)                                    1 running
 
-┃ Will create
-┃ branch  task/SP-1234-login-fix
-┃ base    origin/main
-┃ folder  ~/Documents/gitlab/product-catalog-task-sp-1234-login-fix
-┃ setup   pnpm install
-┃ Create this worktree? (Y/n)
+▌  1 ● task/SP-12392-build-navigation-bar               Running
+        main · 4m · working…
+   2 ● fix/SP-12222-fix-bug-in-home-page                Finished
+        main · 1m · idle 1m ago · ready to review
+   3 ● chore/SP-12001-bump-deps                         Inactive
+        main · 2h · ended (terminal closed)
 
-✓ worktree at ~/Documents/product-catalog-task-sp-1234-login-fix
-✓ copied: .env, .env.local
-✓ setup complete (pnpm install)
-
-Ready. launching claude in product-catalog-task-sp-1234-login-fix …
+› Type a command…  try /new
+─────────────────────────────────────────────────────────────────
+Viewing active sessions · task/SP-12392…   ↑↓ navigate  enter view  o open IDE  x remove  / command  Esc exit
 ```
 
-It then drops you into `claude` inside the new worktree. Open a second
-terminal, run `fleet --new` for another ticket, and you've got two agents
-working in parallel with zero file collisions.
+Type `/new`, answer the wizard (name → directory → base branch → setup →
+review), and `fleet` creates the worktree and launches the agent **in a new
+terminal window**. `fleet` keeps your terminal and tracks each agent's state —
+Running / Finished / Needs input / Inactive — live.
 
 ---
 
 ## What's a worktree
 
-Most devs work on one repo and on one branch at a time. Worktrees lets one repo have
+Most devs work on one repo and one branch at a time. Worktrees let one repo have
 several folders checked out to different branches at once, all sharing the same
 `.git` history. Agent A edits folder A on its branch; agent B edits folder B on
-its branch. They never step on each other. `fleet --new` automates creating one
-of those folders + a branch you name yourself, however your team names branches.
+its branch. They never step on each other. The `/new` wizard automates creating
+one of those folders + a branch you name yourself, however your team names
+branches.
 
 ---
 
@@ -67,13 +60,17 @@ of those folders + a branch you name yourself, however your team names branches.
 
 If `~/.local/bin` isn't on your PATH, the script tells you the line to add.
 
-> Once you publish to GitHub Releases, teammates can skip cloning:
-> `RELEASE_BASE_URL=https://github.com/<org>/command-center/releases/latest/download ./install.sh`
+On first launch `fleet` runs a one-time **onboarding**: pick your provider and
+(recommended) let it install 4 status hooks into `~/.claude/settings.json` so it
+can show live agent state. The merge is consented and reversible (`fleet
+uninstall`); skipping it leaves `fleet` with Active/Inactive tracking only.
 
 ### Requirements at runtime
 
 - **git** (any modern version)
 - **claude** on PATH — only if you keep the default `launch: "claude"`
+- a terminal `fleet` can spawn agents into (per-OS default; override with
+  `terminal` in `~/.config/fleet/config.json`)
 
 ---
 
@@ -95,21 +92,35 @@ release, run `./build.sh v1.2.3` and upload `dist/*` to a GitHub Release.
 ## Usage
 
 ```bash
-fleet --new        # interactive: branch name → base branch → create + launch
+fleet              # launch the home dashboard (all sessions, live state)
+fleet --new [b]    # jump straight into the new-session wizard (optional branch prefill)
+fleet setup        # re-run first-run onboarding (provider + hooks)
+fleet install      # install the agent status hooks
+fleet uninstall    # remove the agent status hooks
 fleet --help
 fleet --version
 ```
 
-Run it from **inside the repo you want a worktree of**. `fleet` finds the repo
-root, creates the worktree as a sibling folder, copies your gitignored env
-files, installs dependencies, and launches your agent.
+In the TUI the command bar (press `/`) runs `/commands`:
+
+| Command         | Hotkey      | Action                                       |
+| --------------- | ----------- | -------------------------------------------- |
+| `/new [branch]` | `/` then type | start the new-session wizard               |
+| `/view <id>`    | `enter`     | open the session's worktree in your IDE      |
+| `/open <id>`    | `o`         | open the worktree in your IDE                |
+| `/rm <id>`      | `x`         | remove the worktree + session (with confirm) |
+| `/setup`        | —           | re-run onboarding                            |
+| `/quit`         | `Esc`       | exit (sessions keep running in their terminals) |
+
+`id` defaults to the selected row when omitted.
 
 ---
 
 ## Configuration
 
-Defaults live in [`config.go`](config.go). Override them **per repo** by
-dropping a `.ccrc.json` at that repo's root (copy
+Two layers, neither of which ever lands in your repo:
+
+**Per-repo** — drop a `.ccrc.json` at a repo's root (copy
 [`.ccrc.example.json`](.ccrc.example.json)):
 
 | key            | default                       | meaning                                                       |
@@ -118,48 +129,57 @@ dropping a `.ccrc.json` at that repo's root (copy
 | `defaultBase`  | `main`                        | pre-selected base                                             |
 | `worktreeName` | `{repo}-{branch}`             | sibling folder name. Tokens: `{repo}`, `{branch}` (slugified) |
 | `copyFiles`    | `[".env", ".env.local", ...]` | gitignored files copied into the worktree                     |
-| `install`      | `true`                        | whether to offer a setup step after creating the worktree     |
+| `install`      | `true`                        | whether to offer a setup step in the wizard                   |
 | `setup`        | `""`                          | explicit setup command; overrides auto-detection when set     |
-| `launch`       | `claude`                      | command run in the worktree when done (`""` to skip)          |
+| `launch`       | `claude`                      | (legacy) the agent command; providers now define their launch |
 | `fetch`        | `true`                        | `git fetch` the base before forking so it's fresh             |
 
-You name the branch yourself, however your team names branches — the only
-normalization is that surrounding/internal whitespace collapses to dashes
-(`login fix` → `login-fix`). The worktree folder name is the slugified branch
-(`task/SP-1234-login-fix` → `product-catalog-task-sp-1234-login-fix`).
+**Global** — `~/.config/fleet/` (honoring `XDG_CONFIG_HOME`), all owned by fleet:
+
+```
+~/.config/fleet/
+├── config.json              # setupComplete, defaultProvider, ide, terminal
+├── sessions.json            # the session registry (persisted, survives restarts)
+├── prefs.json               # "last used" cache: recent dirs, per-repo base & setup
+└── state/<session>.json     # transient per-session activity, written by `fleet hook`
+```
+
+`config.json` keys: `ide` (e.g. `"code"`, used by `/open` and `/view`) and
+`terminal` (the command fleet spawns agents into; `""` = a per-OS default —
+macOS `osascript`, Linux `$TERMINAL`/`x-terminal-emulator`, Windows `wt`). A
+custom `terminal` template may use `{dir}` and `{cmd}` placeholders.
 
 **Setup step.** A fresh worktree shares `.git` but not gitignored, per-folder
-state like `node_modules`, so JS projects need their dependencies installed
-before the worktree is usable. When creating a worktree, fleet shows a **setup
-command picker** — a short list of common commands plus *Custom…* and *Skip* —
-with a sensible option pre-selected. The pre-selection is resolved in order:
+state like `node_modules`, so JS projects need dependencies installed before the
+worktree is usable. The wizard's setup picker pre-selects in order:
 
 1. an explicit `setup` in `.ccrc.json` (always wins), then
-2. **your last choice for this repo**, then
+2. **your last choice for this repo** (from `prefs.json`), then
 3. auto-detection from the lockfile (`pnpm install`, `npm ci`, … — JS only).
 
-Whatever you pick (including *Skip*) is **remembered per repo**, so the next
-`fleet --new` in the same repo pre-selects it. That memory is a per-user cache
-at `~/.config/fleet/setups.json` (honoring `XDG_CONFIG_HOME`), keyed by the
-repo's absolute path — it never touches the repo itself. Detection only knows
-the JS ecosystem; for anything else just pick *Custom…* once (or pin it in
-`.ccrc.json`):
-
-```jsonc
-{ "setup": "uv sync" }                        // Python (uv / poetry / pip ...)
-{ "setup": "docker compose up -d --build" }   // local container dev
-{ "install": false }                          // never offer setup (e.g. Go — uses a shared module cache)
-```
+Your choice (including *Skip*) is remembered per repo. A legacy
+`~/.config/fleet/setups.json` from older versions is migrated into `prefs.json`
+automatically on first run.
 
 ---
 
-## Cleanup when a ticket is done
+## How live status works
 
-```bash
-git worktree list                              # see all worktrees
-git worktree remove ../product-catalog-task-sp-1234-login-fix   # delete the folder
-git branch -d task/SP-1234-login-fix                            # (optional) drop the local branch
-```
+When you install hooks, fleet merges 4 entries into `~/.claude/settings.json`,
+each invoking the fleet binary itself (no bash/jq, cross-platform):
+
+| Claude hook event  | `fleet hook …`  | state          |
+| ------------------ | --------------- | -------------- |
+| `UserPromptSubmit` | `running`       | **Running**    |
+| `Stop`             | `finished`      | **Finished**   |
+| `Notification`     | `needs-input`   | **Needs input**|
+| `SessionEnd`       | `inactive`      | **Inactive**   |
+
+`fleet hook <state>` reads the hook payload on stdin, maps `cwd` → worktree →
+session, and atomically writes `~/.config/fleet/state/<session_id>.json`. The
+TUI watches that directory and updates the matching row. A hard kill (closing
+the terminal) fires no hook; fleet falls back to process liveness where a PID is
+available.
 
 ---
 
@@ -167,33 +187,31 @@ git branch -d task/SP-1234-login-fix                            # (optional) dro
 
 ```
 command-center/
-├── main.go            # entrypoint + arg routing + --help/--version
-├── newcmd.go          # the `fleet --new` flow (huh forms + git steps)
-├── config.go          # defaults + .ccrc.json loading
-├── git.go             # git repo detection + exec helpers
-├── pkg.go             # setup-command detection (JS package managers)
-├── cache.go           # per-repo setup-choice cache (~/.config/fleet)
-├── util.go            # slugify / branch-sanitize / template helpers
-├── *_test.go          # unit + end-to-end worktree tests
-├── build.sh           # cross-compile every platform → dist/
-├── install.sh         # macOS/Linux/WSL installer
-├── install.ps1        # Windows installer
-└── .ccrc.example.json
+├── main.go                     # arg routing: TUI · hook · install/uninstall · setup · --new shim
+├── internal/
+│   ├── tui/                     # bubbletea models: app shell, home, wizard, onboarding
+│   ├── session/                 # Session, canonical State, persisted Registry, liveness
+│   ├── provider/                # Provider + StateTracker seam; claude/ adapter (hooks, tracker)
+│   ├── worktree/                # git worktree ops + branch/plan/util/pkg helpers
+│   ├── fsbrowse/                # directory browser + repo detection + branch listing
+│   ├── term/                    # spawn an agent in a new terminal (configurable + per-OS)
+│   └── config/                  # .ccrc.json + global config.json + prefs.json
+├── design/                      # DESIGN.md spec + mockup.html UI reference
+├── build.sh · install.sh · install.ps1 · .ccrc.example.json
 ```
 
-Uses [charmbracelet/huh](https://github.com/charmbracelet/huh) for the
-interactive prompts. The repo/module is named `command-center`; the installed
-command is `fleet`.
+Built on [charmbracelet/bubbletea](https://github.com/charmbracelet/bubbletea) +
+[bubbles](https://github.com/charmbracelet/bubbles) +
+[lipgloss](https://github.com/charmbracelet/lipgloss). The repo/module is named
+`command-center`; the installed command is `fleet`.
 
 ---
 
-## Extending it
+## Extending it: adding a provider
 
-E.g. To add `fleet --list`:
-
-1. Write `runList()` in a new `listcmd.go`.
-2. Add a `case "--list", "list":` in `main.go`.
-3. Document it in `printHelp()`.
-
-Natural next commands: `--list`, `--rm` (remove a worktree), `--open`, and a
-conventional-commit helper.
+The core never names Claude. A new agent backend (e.g. Codex) implements the
+`provider.Provider` seam — `LaunchSpec`, `Install`/`Uninstall`, `Tracker` — and
+calls `provider.Register(...)` in `main.go`. No changes to the shell, registry,
+or state model. A provider with no activity integration still gets
+Active/Inactive for free via process liveness. See
+[`design/DESIGN.md`](design/DESIGN.md) §7 and §14.

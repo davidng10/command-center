@@ -1,14 +1,16 @@
-package main
+package worktree
 
 import (
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"command-center/internal/config"
 )
 
 // TestCreateWorktreeEndToEnd builds a throwaway git repo and exercises the real
-// git side of the flow: resolveStartPoint -> addWorktree -> copyConfiguredFiles.
+// git side of the flow: ResolveStartPoint -> AddWorktree -> CopyConfiguredFiles.
 func TestCreateWorktreeEndToEnd(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -29,15 +31,15 @@ func TestCreateWorktreeEndToEnd(t *testing.T) {
 	run(t, root, "git", "commit", "-qm", "init")
 
 	repo := RepoContext{Root: root, Name: "demo-repo", Parent: tmp}
-	cfg := defaultConfig()
+	cfg := config.Default()
 	cfg.Fetch = false // no remote in the sandbox
 
-	p := buildPlan(repo, cfg, "task/SP-1234-login fix")
+	p := BuildPlan(repo, cfg, "task/SP-1234-login fix")
 	if p.Branch != "task/SP-1234-login-fix" {
 		t.Fatalf("unexpected branch %q", p.Branch)
 	}
 
-	startPoint, fetchErr := resolveStartPoint(repo, cfg, "main")
+	startPoint, fetchErr := ResolveStartPoint(repo, cfg, "main")
 	if fetchErr != nil {
 		t.Fatalf("unexpected fetch error: %v", fetchErr)
 	}
@@ -45,15 +47,15 @@ func TestCreateWorktreeEndToEnd(t *testing.T) {
 		t.Fatalf("startPoint = %q, want main", startPoint)
 	}
 
-	if err := addWorktree(repo, p, startPoint); err != nil {
-		t.Fatalf("addWorktree: %v", err)
+	if err := AddWorktree(repo, p, startPoint); err != nil {
+		t.Fatalf("AddWorktree: %v", err)
 	}
 
 	// worktree folder exists and is checked out on the right branch
 	if _, err := os.Stat(p.WorktreePath); err != nil {
 		t.Fatalf("worktree path missing: %v", err)
 	}
-	branch, err := git(p.WorktreePath, "rev-parse", "--abbrev-ref", "HEAD")
+	branch, err := Git(p.WorktreePath, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		t.Fatalf("rev-parse: %v", err)
 	}
@@ -62,7 +64,7 @@ func TestCreateWorktreeEndToEnd(t *testing.T) {
 	}
 
 	// the gitignored .env was carried over
-	copied := copyConfiguredFiles(repo, cfg, p)
+	copied := CopyConfiguredFiles(repo, cfg, p)
 	if len(copied) == 0 {
 		t.Fatalf("expected .env to be copied")
 	}
@@ -71,8 +73,13 @@ func TestCreateWorktreeEndToEnd(t *testing.T) {
 		t.Fatalf("copied .env wrong: %q err=%v", string(got), err)
 	}
 
-	// cleanup
-	run(t, root, "git", "worktree", "remove", p.WorktreePath)
+	// Remove() cleans up the worktree fleet created.
+	if err := Remove(repo, p.WorktreePath); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if _, err := os.Stat(p.WorktreePath); !os.IsNotExist(err) {
+		t.Fatalf("worktree still present after Remove: %v", err)
+	}
 }
 
 // TestResolveStartPointFetchFailure verifies that a failed fetch is surfaced
@@ -93,9 +100,9 @@ func TestResolveStartPointFetchFailure(t *testing.T) {
 	run(t, root, "git", "commit", "-qm", "init")
 
 	repo := RepoContext{Root: root, Name: "no-remote", Parent: tmp}
-	cfg := defaultConfig() // Fetch is true by default, but there is no 'origin'
+	cfg := config.Default() // Fetch is true by default, but there is no 'origin'
 
-	startPoint, fetchErr := resolveStartPoint(repo, cfg, "main")
+	startPoint, fetchErr := ResolveStartPoint(repo, cfg, "main")
 	if fetchErr == nil {
 		t.Fatal("expected a fetch error when there is no origin remote")
 	}

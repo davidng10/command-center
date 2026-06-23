@@ -1,8 +1,10 @@
-package main
+package worktree
 
 import (
 	"slices"
 	"testing"
+
+	"command-center/internal/config"
 )
 
 func TestSlugify(t *testing.T) {
@@ -12,8 +14,8 @@ func TestSlugify(t *testing.T) {
 		"already-kebab":       "already-kebab",
 	}
 	for in, want := range cases {
-		if got := slugify(in); got != want {
-			t.Errorf("slugify(%q) = %q, want %q", in, got, want)
+		if got := Slugify(in); got != want {
+			t.Errorf("Slugify(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
@@ -26,8 +28,8 @@ func TestSanitizeBranch(t *testing.T) {
 		"already/kebab":          "already/kebab",
 	}
 	for in, want := range cases {
-		if got := sanitizeBranch(in); got != want {
-			t.Errorf("sanitizeBranch(%q) = %q, want %q", in, got, want)
+		if got := SanitizeBranch(in); got != want {
+			t.Errorf("SanitizeBranch(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
@@ -45,28 +47,28 @@ func TestSplitLaunch(t *testing.T) {
 		{"   ", "", nil},
 	}
 	for _, c := range cases {
-		name, args := splitLaunch(c.in)
+		name, args := SplitLaunch(c.in)
 		if name != c.wantName {
-			t.Errorf("splitLaunch(%q) name = %q, want %q", c.in, name, c.wantName)
+			t.Errorf("SplitLaunch(%q) name = %q, want %q", c.in, name, c.wantName)
 		}
 		if !slices.Equal(args, c.wantArgs) {
-			t.Errorf("splitLaunch(%q) args = %v, want %v", c.in, args, c.wantArgs)
+			t.Errorf("SplitLaunch(%q) args = %v, want %v", c.in, args, c.wantArgs)
 		}
 	}
 }
 
 func TestApplyTemplate(t *testing.T) {
-	got := applyTemplate("{repo}-{branch}", map[string]string{
+	got := ApplyTemplate("{repo}-{branch}", map[string]string{
 		"repo": "product-catalog", "branch": "task-sp-1234-login-fix",
 	})
 	if want := "product-catalog-task-sp-1234-login-fix"; got != want {
-		t.Errorf("applyTemplate = %q, want %q", got, want)
+		t.Errorf("ApplyTemplate = %q, want %q", got, want)
 	}
 }
 
 func TestBuildPlan(t *testing.T) {
 	repo := RepoContext{Root: "/x/product-catalog", Name: "product-catalog", Parent: "/x"}
-	p := buildPlan(repo, defaultConfig(), "task/SP-1234-login fix")
+	p := BuildPlan(repo, config.Default(), "task/SP-1234-login fix")
 
 	if p.Branch != "task/SP-1234-login-fix" {
 		t.Errorf("Branch = %q", p.Branch)

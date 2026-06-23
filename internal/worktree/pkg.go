@@ -1,16 +1,18 @@
-package main
+package worktree
 
 import (
 	"os"
 	"path/filepath"
+
+	"command-center/internal/config"
 )
 
-// detectSetupCommand suggests the dependency-install command for a Node project,
+// DetectSetupCommand suggests the dependency-install command for a Node project,
 // inferred from its lockfile. It returns "" when root isn't a recognizable Node
 // project (Go/Rust/etc. need no per-worktree install, and anything else is the
 // user's to configure via `setup`). The result is only a suggestion — the user
 // confirms or edits it before it runs, so a wrong guess is harmless.
-func detectSetupCommand(root string) string {
+func DetectSetupCommand(root string) string {
 	has := func(f string) bool {
 		_, err := os.Stat(filepath.Join(root, f))
 		return err == nil
@@ -30,9 +32,9 @@ func detectSetupCommand(root string) string {
 	return ""
 }
 
-// commonSetups are the setup commands offered in the picker alongside whatever
+// CommonSetups are the setup commands offered in the picker alongside whatever
 // is detected/remembered — a small fixed catalog covering the usual ecosystems.
-var commonSetups = []string{
+var CommonSetups = []string{
 	"pnpm install",
 	"npm ci",
 	"npm install",
@@ -43,15 +45,15 @@ var commonSetups = []string{
 	"docker compose up -d --build",
 }
 
-// resolveSetupDefault picks the setup command to pre-select in the picker:
+// ResolveSetupDefault picks the setup command to pre-select in the picker:
 // an explicit .ccrc.json `setup` wins, then a previously remembered choice for
 // this repo, then auto-detection. source names which one, for the picker label.
-func resolveSetupDefault(cfg Config, repoRoot string) (cmd, source string) {
+func ResolveSetupDefault(cfg config.Config, repoRoot string) (cmd, source string) {
 	if cfg.Setup != "" {
 		return cfg.Setup, "configured"
 	}
-	if c, ok := cachedSetup(repoRoot); ok {
+	if c, ok := config.CachedSetup(repoRoot); ok {
 		return c, "saved"
 	}
-	return detectSetupCommand(repoRoot), "detected"
+	return DetectSetupCommand(repoRoot), "detected"
 }
