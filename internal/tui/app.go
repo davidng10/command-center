@@ -48,9 +48,10 @@ type App struct {
 	global config.Global
 	acts   <-chan provider.StateUpdate
 
-	now     time.Time
-	pulseOn bool
-	flash   string // transient feedback line (errors / confirmations)
+	now       time.Time
+	pulseOn   bool
+	tickCount int
+	flash     string // transient feedback line (errors / confirmations)
 
 	// home
 	homeCursor      int
@@ -64,7 +65,7 @@ type App struct {
 	wiz *wizardModel
 	onb *onboardModel
 
-	busy bool // a create flow is running
+	busyLabel string // non-empty → an async operation is in progress (shown as spinner + label)
 }
 
 // Messages.
@@ -74,6 +75,16 @@ type createResultMsg struct {
 	sess session.Session
 	warn string
 	err  error
+}
+type removeResultMsg struct {
+	branch string
+	err    string
+}
+type relaunchResultMsg struct {
+	id     string
+	branch string
+	pid    int
+	err    string
 }
 
 // Run loads state, wires the default provider's tracker, and runs the program.
@@ -159,7 +170,7 @@ func (a App) Init() tea.Cmd {
 }
 
 func tickCmd() tea.Cmd {
-	return tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg(t) })
+	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
 // waitActivity blocks on the tracker channel and turns one update into a msg,
@@ -182,8 +193,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		a.now = time.Now()
-		a.pulseOn = !a.pulseOn
-		_, _ = a.reg.ReconcileLiveness()
+		a.tickCount++
+		if a.tickCount%5 == 0 {
+			a.pulseOn = !a.pulseOn
+		}
+		if a.tickCount%10 == 0 {
+			_, _ = a.reg.ReconcileLiveness()
+		}
 		return a, tickCmd()
 
 	case activityMsg:
@@ -192,7 +208,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, waitActivity(a.acts)
 
 	case createResultMsg:
-		a.busy = false
+		a.busyLabel = ""
 		if m.err != nil {
 			a.flash = stErr("create failed: " + m.err.Error())
 			a.scr = scrHome
@@ -207,6 +223,32 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.scr = scrHome
 		a.wiz = nil
+		return a, nil
+
+	case removeResultMsg:
+		a.busyLabel = ""
+		if m.err != "" {
+			a.flash = stWarn("worktree not fully removed: " + m.err)
+		} else {
+			a.flash = stOK("removed " + m.branch)
+		}
+		a.clampHomeCursor(len(a.reg.All()))
+		return a, nil
+
+	case relaunchResultMsg:
+		a.busyLabel = ""
+		if m.err != "" {
+			a.flash = stWarn("relaunch failed: " + m.err)
+			return a, nil
+		}
+		now := time.Now()
+		a.reg.Update(m.id, func(s *session.Session) {
+			s.State = session.StateRunning
+			s.PID = m.pid
+			s.LastActivity = now
+			s.CreatedAt = now
+		})
+		a.flash = stOK("relaunched " + m.branch)
 		return a, nil
 
 	case tea.KeyMsg:
@@ -255,7 +297,10 @@ func (a App) frame(header, body, ctx string, keys [][2]string, showCmdBar bool) 
 	inner := a.innerWidth()
 
 	upper := []string{header, body}
-	if a.flash != "" {
+	if a.busyLabel != "" {
+		frame := spinnerFrames[a.tickCount%len(spinnerFrames)]
+		upper = append(upper, " "+stAccent.Render(frame)+" "+stDim.Render(a.busyLabel))
+	} else if a.flash != "" {
 		upper = append(upper, " "+a.flash)
 	}
 	if showCmdBar {
@@ -350,6 +395,9 @@ func keysString(keys [][2]string) string {
 }
 
 // ---- small helpers ----------------------------------------------------------
+
+// spinnerFrames are the braille spinner characters, indexed by the tick counter.
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 func stErr(s string) string {
 	return lipgloss.NewStyle().Foreground(cInfo).Render("✗ ") + stDim.Render(s)

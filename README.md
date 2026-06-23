@@ -48,15 +48,15 @@ branches.
 ## Install
 
 ```bash
-# macOS / Linux / WSL
-./install.sh
-#   → installs to ~/.local/bin/fleet   (override: BIN_DIR=/usr/local/bin ./install.sh)
+# one-liner — downloads the latest release binary (macOS / Linux / WSL)
+curl -fsSL https://raw.githubusercontent.com/davidng10/command-center/main/install.sh | sh
 ```
 
-```powershell
-# native Windows (PowerShell). WSL users: use ./install.sh instead.
-.\install.ps1
-```
+Options:
+- **Specific version:** `VERSION=v1.0.0 curl -fsSL … | sh`
+- **Custom location:** `BIN_DIR=/usr/local/bin curl -fsSL … | sh`
+- **From a cloned repo:** `make install` (or `./build.sh && ./install.sh`)
+- **Windows (PowerShell):** `.\install.ps1`
 
 If `~/.local/bin` isn't on your PATH, the script tells you the line to add.
 

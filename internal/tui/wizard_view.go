@@ -94,7 +94,7 @@ func (a App) viewWizard() string {
 		body = a.viewConfirm(inner)
 		ctx = stInkB.Render("New session") + stDim.Render(" · review")
 		keys = [][2]string{{"enter", "create"}, {"Esc", "back"}}
-		if a.busy {
+		if a.busyLabel != "" {
 			keys = [][2]string{{"…", "creating worktree"}}
 		}
 	}
@@ -132,7 +132,7 @@ func (a App) viewConfirm(inner int) string {
 
 	ask := stInk.Render("Create this worktree and launch the agent?")
 	yn := stDim.Render("Enter = create · Esc = back")
-	if a.busy {
+	if a.busyLabel != "" {
 		ask = stAccent.Render("Creating worktree and launching the agent…")
 		yn = ""
 	}

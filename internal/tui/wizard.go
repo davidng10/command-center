@@ -133,7 +133,7 @@ func (a App) updateWizard(m tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// While a create is running, ignore input so Enter can't double-submit.
-	if a.busy {
+	if a.busyLabel != "" {
 		return a, nil
 	}
 
@@ -480,7 +480,7 @@ func buildSetupItems(cfg config.Config, repo worktree.RepoContext) []setupItem {
 
 func (a App) startCreate() (tea.Model, tea.Cmd) {
 	w := a.wiz
-	a.busy = true
+	a.busyLabel = "Creating worktree…"
 	repo, cfg := w.repo, w.cfg
 	branchRaw, base, setupCmd := w.branch, w.base, w.setupCmd
 	prov, global := a.prov, a.global

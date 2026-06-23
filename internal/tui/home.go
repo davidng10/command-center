@@ -16,6 +16,10 @@ import (
 // updateHome handles keys on the home screen across its three input modes:
 // removal-confirm, command-bar, and (default) list navigation.
 func (a App) updateHome(m tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if a.busyLabel != "" {
+		return a, nil // ignore input while an async operation is in progress
+	}
+
 	sessions := a.reg.All()
 	a.clampHomeCursor(len(sessions))
 
@@ -23,7 +27,7 @@ func (a App) updateHome(m tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if a.confirmRemoveID != "" {
 		switch m.String() {
 		case "y", "Y":
-			return a.removeSession(a.confirmRemoveID), nil
+			return a.removeSession(a.confirmRemoveID)
 		default: // n, esc, anything else cancels
 			a.confirmRemoveID = ""
 			a.flash = ""
@@ -318,25 +322,26 @@ func (a App) runCommand(cmd string, sessions []session.Session) (tea.Model, tea.
 	return a, nil
 }
 
-// removeSession deletes the worktree and registry entry for id.
-func (a App) removeSession(id string) App {
+// removeSession kicks off async worktree removal and registry cleanup.
+func (a App) removeSession(id string) (tea.Model, tea.Cmd) {
 	a.confirmRemoveID = ""
 	s, ok := a.reg.Get(id)
 	if !ok {
 		a.flash = stWarn("session gone")
-		return a
+		return a, nil
 	}
-	if s.RepoDir != "" && s.WorktreePath != "" {
-		if err := worktree.Remove(worktree.ContextFromRoot(s.RepoDir), s.WorktreePath); err != nil {
-			a.flash = stWarn("worktree not fully removed: " + err.Error())
-		}
-	}
+	a.busyLabel = "Removing " + s.Branch + "…"
+	repoDir, wtPath, branch := s.RepoDir, s.WorktreePath, s.Branch
 	_ = a.reg.Remove(id)
-	if a.flash == "" {
-		a.flash = stOK("removed " + s.Branch)
+	return a, func() tea.Msg {
+		var errMsg string
+		if repoDir != "" && wtPath != "" {
+			if err := worktree.Remove(worktree.ContextFromRoot(repoDir), wtPath); err != nil {
+				errMsg = err.Error()
+			}
+		}
+		return removeResultMsg{branch: branch, err: errMsg}
 	}
-	a.clampHomeCursor(len(a.reg.All()))
-	return a
 }
 
 // relaunchSession spawns a fresh agent terminal for an Inactive session,
@@ -351,20 +356,15 @@ func (a App) relaunchSession(s session.Session) (tea.Model, tea.Cmd) {
 		a.flash = stWarn("provider returned no launch command")
 		return a, nil
 	}
-	pid, err := term.Spawn(launch.Dir, launch.Program, launch.Args, a.global.Terminal)
-	if err != nil {
-		a.flash = stWarn("relaunch failed: " + err.Error())
-		return a, nil
+	a.busyLabel = "Launching " + s.Branch + "…"
+	id, branch, terminal := s.ID, s.Branch, a.global.Terminal
+	return a, func() tea.Msg {
+		pid, err := term.Spawn(launch.Dir, launch.Program, launch.Args, terminal)
+		if err != nil {
+			return relaunchResultMsg{id: id, branch: branch, err: err.Error()}
+		}
+		return relaunchResultMsg{id: id, branch: branch, pid: pid}
 	}
-	now := time.Now()
-	a.reg.Update(s.ID, func(s *session.Session) {
-		s.State = session.StateRunning
-		s.PID = pid
-		s.LastActivity = now
-		s.CreatedAt = now
-	})
-	a.flash = stOK("relaunched " + s.Branch)
-	return a, nil
 }
 
 func viewFlash(ideErr string, s session.Session) string {
