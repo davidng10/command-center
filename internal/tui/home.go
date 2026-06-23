@@ -252,25 +252,37 @@ func (a App) viewHome() string {
 	for i, s := range sessions {
 		rows[i] = a.renderRow(i+1, s, i == a.homeCursor, inner)
 	}
-	// Each row is 2 lines; keep the selected row visible within the body region
-	// (header 1 + status 2 + command box 3 ≈ 6 chrome lines reserved).
-	maxRows := (a.height - 8) / 2
+	// Each row is 2 lines; keep the selected row visible within the body region.
+	// Chrome: header (1) + leading blank (1) + padding (1) + cmdbar (3) + flash (1) + status (2) = 9.
+	maxRows := (a.height - 9) / 2
 	if maxRows < 1 {
 		maxRows = 1
 	}
-	rows = windowAround(rows, a.homeCursor, maxRows)
+	visible, scrollUp, scrollDown := windowAroundInfo(rows, a.homeCursor, maxRows)
 
-	body := "\n" + strings.Join(rows, "\n")
+	var parts []string
+	if scrollUp {
+		parts = append(parts, "      "+stDimmer.Render(fmt.Sprintf("↑ %d more", a.homeCursor-maxRows/2)))
+	}
+	parts = append(parts, visible...)
+	if scrollDown {
+		below := len(rows) - (a.homeCursor + maxRows/2 + 1)
+		if below < 1 {
+			below = len(rows) - len(visible) // fallback
+		}
+		parts = append(parts, "      "+stDimmer.Render(fmt.Sprintf("↓ %d more", below)))
+	}
+
+	body := "\n" + strings.Join(parts, "\n") + "\n"
 
 	// The status bar shows hotkeys only — the context label was just noise on
 	// home. The one exception is the remove confirmation, where the keys (y/n)
 	// don't say what's being deleted, so we keep that prompt on the left.
 	ctx := ""
-	enterHint := "open IDE"
+	keys := [][2]string{{"↑↓", "navigate"}, {"o", "open IDE"}, {"x", "remove"}, {"/", "command"}, {"Esc", "exit"}}
 	if s, ok := a.selected(sessions); ok && s.State == session.StateInactive {
-		enterHint = "relaunch"
+		keys = [][2]string{{"↑↓", "navigate"}, {"enter", "relaunch"}, {"o", "open IDE"}, {"x", "remove"}, {"/", "command"}, {"Esc", "exit"}}
 	}
-	keys := [][2]string{{"↑↓", "navigate"}, {"enter", enterHint}, {"o", "open IDE"}, {"x", "remove"}, {"/", "command"}, {"Esc", "exit"}}
 	if a.cmdMode {
 		keys = [][2]string{{"enter", "run"}, {"Esc", "cancel"}}
 	}

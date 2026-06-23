@@ -242,38 +242,47 @@ func (a App) View() string {
 
 // ---- frame composition -----------------------------------------------------
 
-// frame assembles the persistent chrome: the header line (built per-screen), the
-// body (padded to fill), an optional command bar, and the status bar pinned to
-// the bottom.
+// frame assembles the persistent chrome. From top to bottom:
+//
+//	header → body → flash → cmdbar → key hints → [spacer] → context bar (if any)
+//
+// The command bar and key hints sit directly below the content so they stay close
+// on tall screens. The context bar (e.g. remove confirmation) is pinned to the
+// bottom via a spacer; it is omitted entirely when empty.
 func (a App) frame(header, body, ctx string, keys [][2]string, showCmdBar bool) string {
 	inner := a.innerWidth()
-	status := a.renderStatus(inner, ctx, keys)
 
-	reserved := 3 // header (1) + status (2: divider + content)
-	var cmdbar string
-	if showCmdBar {
-		cmdbar = a.renderCmdBar()
-		reserved += 3 // top rule + content + bottom rule
-	}
+	upper := []string{header, body}
 	if a.flash != "" {
-		reserved++
-	}
-
-	bodyHeight := a.height - reserved
-	if bodyHeight < 1 {
-		bodyHeight = 1
-	}
-	body = clampHeight(body, bodyHeight)
-
-	parts := []string{header, body}
-	if a.flash != "" {
-		parts = append(parts, " "+a.flash)
+		upper = append(upper, " "+a.flash)
 	}
 	if showCmdBar {
-		parts = append(parts, cmdbar)
+		upper = append(upper, a.renderCmdBar())
 	}
-	parts = append(parts, status)
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	if len(keys) > 0 {
+		upper = append(upper, " "+keysString(keys))
+	}
+	top := lipgloss.JoinVertical(lipgloss.Left, upper...)
+
+	if ctx == "" {
+		// No context bar — just pad to fill the screen.
+		topLines := strings.Count(top, "\n") + 1
+		spacerHeight := a.height - topLines
+		if spacerHeight < 0 {
+			spacerHeight = 0
+		}
+		return top + strings.Repeat("\n", spacerHeight)
+	}
+
+	// Context bar pinned to the bottom.
+	ctxBar := a.renderContextBar(inner, ctx)
+	topLines := strings.Count(top, "\n") + 1
+	ctxLines := strings.Count(ctxBar, "\n") + 1
+	spacerHeight := a.height - topLines - ctxLines
+	if spacerHeight < 0 {
+		spacerHeight = 0
+	}
+	return top + strings.Repeat("\n", spacerHeight) + ctxBar
 }
 
 func (a App) innerWidth() int {
@@ -319,21 +328,12 @@ func (a App) renderCmdBar() string {
 		Render(content)
 }
 
-// renderStatus draws the status bar. With a context label it's split (label
-// left, hotkeys right); with no label the hotkeys sit left-aligned on their own.
-func (a App) renderStatus(width int, ctx string, keys [][2]string) string {
-	right := keysString(keys)
-	line := right
-	if ctx != "" {
-		gap := width - lipgloss.Width(ctx) - lipgloss.Width(right)
-		if gap < 1 {
-			gap = 1
-		}
-		line = ctx + strings.Repeat(" ", gap) + right
-	}
+// renderContextBar draws the bottom context bar (e.g. remove confirmation),
+// separated by a top border. Only rendered when ctx is non-empty.
+func (a App) renderContextBar(width int, ctx string) string {
 	return lipgloss.NewStyle().Foreground(cDim).
 		BorderTop(true).BorderStyle(lipgloss.NormalBorder()).BorderForeground(cLine).
-		Width(width).Render(line)
+		Width(width).Render(ctx)
 }
 
 func keysString(keys [][2]string) string {
@@ -369,11 +369,18 @@ func clampHeight(s string, h int) string {
 	return strings.Join(lines, "\n")
 }
 
-// windowAround returns at most max lines from lines, scrolled to keep cursor
-// visible. Used so long lists never overflow the body region.
+// windowAround returns at most max items from lines, scrolled to keep cursor
+// visible.
 func windowAround(lines []string, cursor, max int) []string {
+	v, _, _ := windowAroundInfo(lines, cursor, max)
+	return v
+}
+
+// windowAroundInfo is windowAround plus whether there are hidden items above
+// and below the visible slice.
+func windowAroundInfo(lines []string, cursor, max int) (visible []string, scrollUp, scrollDown bool) {
 	if len(lines) <= max {
-		return lines
+		return lines, false, false
 	}
 	start := cursor - max/2
 	if start < 0 {
@@ -382,7 +389,7 @@ func windowAround(lines []string, cursor, max int) []string {
 	if start+max > len(lines) {
 		start = len(lines) - max
 	}
-	return lines[start : start+max]
+	return lines[start : start+max], start > 0, start+max < len(lines)
 }
 
 func mustGetwd() string {
