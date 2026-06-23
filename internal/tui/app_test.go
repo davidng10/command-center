@@ -49,7 +49,7 @@ func TestHomeEmptyAndPopulatedRender(t *testing.T) {
 		t.Fatalf("empty home missing hint:\n%s", out)
 	}
 	// Command bar: new placeholder, top+bottom rules only (no rounded corners).
-	if !strings.Contains(out, "Type / to see available commands") {
+	if !strings.Contains(out, "Type to search") {
 		t.Fatalf("command bar missing new placeholder:\n%s", out)
 	}
 	if strings.ContainsAny(out, "╭╮╰╯│") {
@@ -98,7 +98,7 @@ func TestBackspaceLeavesCommandModeCleanly(t *testing.T) {
 		t.Fatal("backspacing the leading / should exit command mode")
 	}
 	out := a.View()
-	if !strings.Contains(out, "Type / to see available commands") {
+	if !strings.Contains(out, "Type to search") {
 		t.Fatalf("idle placeholder not restored after backspace:\n%s", out)
 	}
 }

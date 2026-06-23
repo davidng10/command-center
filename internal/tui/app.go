@@ -55,6 +55,8 @@ type App struct {
 	// home
 	homeCursor      int
 	cmdMode         bool
+	searchMode      bool
+	searchFilter    string // current live filter text (applied to branch names)
 	cmdInput        textinput.Model
 	confirmRemoveID string // non-empty ⇒ awaiting y/n to remove this session
 
@@ -244,7 +246,7 @@ func (a App) View() string {
 
 // frame assembles the persistent chrome. From top to bottom:
 //
-//	header → body → flash → cmdbar → key hints → [spacer] → context bar (if any)
+//	header → body → flash → cmdbar → [palette] → key hints → [spacer] → context bar
 //
 // The command bar and key hints sit directly below the content so they stay close
 // on tall screens. The context bar (e.g. remove confirmation) is pinned to the
@@ -258,6 +260,10 @@ func (a App) frame(header, body, ctx string, keys [][2]string, showCmdBar bool) 
 	}
 	if showCmdBar {
 		upper = append(upper, a.renderCmdBar())
+	}
+	if a.cmdMode {
+		matches := matchingCommands(a.cmdInput.Value())
+		upper = append(upper, renderCommandPalette(matches))
 	}
 	if len(keys) > 0 {
 		upper = append(upper, " "+keysString(keys))
@@ -305,20 +311,19 @@ func (a App) brandHeader(width int) string {
 }
 
 // cmdPlaceholder is the hint shown in the command bar when idle.
-const cmdPlaceholder = "Type / to see available commands"
+const cmdPlaceholder = "Type to search · / for commands"
 
 // renderCmdBar draws the command input between a top and bottom rule (no corners,
-// no side borders) spanning the full terminal width, edge to edge. A bold ❯ is
-// the caret. In nav mode we render the placeholder ourselves rather than via the
-// textinput, whose blurred placeholder path drops its first character (the stray
-// "T" artifact).
+// no side borders) spanning the full terminal width, edge to edge.
 func (a App) renderCmdBar() string {
-	caret := stAccentB.Render("❯")
 	var content string
-	if a.cmdMode {
-		content = caret + " " + a.cmdInput.View()
-	} else {
-		content = caret + " " + stDimmer.Render(cmdPlaceholder)
+	switch {
+	case a.searchMode:
+		content = stDimmer.Render("⌕") + " " + a.cmdInput.View()
+	case a.cmdMode:
+		content = stAccentB.Render("❯") + " " + a.cmdInput.View()
+	default:
+		content = stAccentB.Render("❯") + " " + stDimmer.Render(cmdPlaceholder)
 	}
 	return lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder(), true, false, true, false). // top + bottom only

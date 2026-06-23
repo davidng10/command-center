@@ -44,27 +44,57 @@ func (a App) updateHome(m tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		var cmd tea.Cmd
 		a.cmdInput, cmd = a.cmdInput.Update(m)
-		// Backspacing the leading "/" (empty input) drops back to navigation.
 		if a.cmdInput.Value() == "" {
 			a.exitCmdMode()
 		}
 		return a, cmd
 	}
 
+	// 2b) Search mode — live-filtering sessions by branch name.
+	// Arrow keys pass through to navigation; everything else goes to the input.
+	if a.searchMode {
+		switch m.Type {
+		case tea.KeyEnter, tea.KeyEsc:
+			a.exitSearchMode()
+			return a, nil
+		case tea.KeyUp:
+			if a.homeCursor > 0 {
+				a.homeCursor--
+			}
+			return a, nil
+		case tea.KeyDown:
+			filtered := a.filteredSessions(sessions)
+			if a.homeCursor < len(filtered)-1 {
+				a.homeCursor++
+			}
+			return a, nil
+		}
+		var cmd tea.Cmd
+		a.cmdInput, cmd = a.cmdInput.Update(m)
+		a.searchFilter = a.cmdInput.Value()
+		if a.searchFilter == "" {
+			a.exitSearchMode()
+		} else {
+			a.homeCursor = 0
+		}
+		return a, cmd
+	}
+
 	// 3) Navigation mode.
+	filtered := a.filteredSessions(sessions)
 	switch m.String() {
 	case "up", "k":
 		if a.homeCursor > 0 {
 			a.homeCursor--
 		}
 	case "down", "j":
-		if a.homeCursor < len(sessions)-1 {
+		if a.homeCursor < len(filtered)-1 {
 			a.homeCursor++
 		}
 	case "/":
 		a.enterCmdMode()
 	case "enter":
-		if s, ok := a.selected(sessions); ok {
+		if s, ok := a.selectedFrom(filtered); ok {
 			if s.State == session.StateInactive {
 				return a.relaunchSession(s)
 			}
@@ -75,7 +105,7 @@ func (a App) updateHome(m tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "o":
-		if s, ok := a.selected(sessions); ok {
+		if s, ok := a.selectedFrom(filtered); ok {
 			if e := openIDE(a.global.IDE, s.WorktreePath); e != "" {
 				a.flash = stWarn(e)
 			} else {
@@ -83,18 +113,24 @@ func (a App) updateHome(m tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "x":
-		if s, ok := a.selected(sessions); ok {
+		if s, ok := a.selectedFrom(filtered); ok {
 			a.confirmRemoveID = s.ID
 			a.flash = ""
 		}
 	case "esc":
 		return a, tea.Quit
+	default:
+		if isSearchKey(m) {
+			a.enterSearchMode(m.String())
+			return a, nil
+		}
 	}
 	return a, nil
 }
 
 func (a *App) enterCmdMode() {
 	a.cmdMode = true
+	a.searchMode = false
 	a.cmdInput.SetValue("/")
 	a.cmdInput.CursorEnd()
 	a.cmdInput.Focus()
@@ -105,6 +141,65 @@ func (a *App) exitCmdMode() {
 	a.cmdMode = false
 	a.cmdInput.SetValue("")
 	a.cmdInput.Blur()
+}
+
+func (a *App) enterSearchMode(initial string) {
+	a.searchMode = true
+	a.cmdMode = false
+	a.cmdInput.SetValue(initial)
+	a.cmdInput.CursorEnd()
+	a.cmdInput.Focus()
+	a.searchFilter = initial
+	a.homeCursor = 0
+	a.flash = ""
+}
+
+func (a *App) exitSearchMode() {
+	a.searchMode = false
+	a.searchFilter = ""
+	a.cmdInput.SetValue("")
+	a.cmdInput.Blur()
+}
+
+// isSearchKey returns true for printable characters that aren't bound as
+// navigation hotkeys, so typing them starts a search filter.
+func isSearchKey(m tea.KeyMsg) bool {
+	if m.Type != tea.KeyRunes || len(m.Runes) == 0 {
+		return false
+	}
+	r := m.Runes[0]
+	if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.' {
+		switch m.String() {
+		case "j", "k", "o", "x":
+			return false // bound hotkeys
+		}
+		return true
+	}
+	return false
+}
+
+// filteredSessions returns sessions matching the current search filter, or all
+// sessions if no filter is active.
+func (a App) filteredSessions(all []session.Session) []session.Session {
+	if a.searchFilter == "" {
+		return all
+	}
+	q := strings.ToLower(a.searchFilter)
+	var out []session.Session
+	for _, s := range all {
+		if strings.Contains(strings.ToLower(s.Branch), q) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// selectedFrom returns the session under the cursor from a (possibly filtered) list.
+func (a App) selectedFrom(sessions []session.Session) (session.Session, bool) {
+	if a.homeCursor < 0 || a.homeCursor >= len(sessions) {
+		return session.Session{}, false
+	}
+	return sessions[a.homeCursor], true
 }
 
 func (a *App) clampHomeCursor(n int) {
@@ -121,6 +216,51 @@ func (a App) selected(sessions []session.Session) (session.Session, bool) {
 		return session.Session{}, false
 	}
 	return sessions[a.homeCursor], true
+}
+
+// commandEntry is one item in the command palette.
+type commandEntry struct {
+	Name string
+	Desc string
+}
+
+// commands is the palette shown when the user presses /.
+var commands = []commandEntry{
+	{"/new", "create a new agent session"},
+	{"/open", "open session worktree in IDE"},
+	{"/rm", "remove session and worktree"},
+	{"/setup", "re-run onboarding"},
+	{"/quit", "exit fleet"},
+}
+
+// matchingCommands returns commands whose name starts with the typed prefix.
+func matchingCommands(input string) []commandEntry {
+	prefix := strings.ToLower(strings.TrimSpace(input))
+	if prefix == "" || prefix == "/" {
+		return commands
+	}
+	if !strings.HasPrefix(prefix, "/") {
+		prefix = "/" + prefix
+	}
+	var out []commandEntry
+	for _, c := range commands {
+		if strings.HasPrefix(c.Name, prefix) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// renderCommandPalette draws the filtered command list below the cmd bar.
+func renderCommandPalette(matches []commandEntry) string {
+	if len(matches) == 0 {
+		return "  " + stDimmer.Render("no matching commands")
+	}
+	var lines []string
+	for _, c := range matches {
+		lines = append(lines, "  "+stAccent.Render(c.Name)+"  "+stDimmer.Render(c.Desc))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // runCommand parses and dispatches a /command typed in the command bar.
@@ -238,14 +378,21 @@ func viewFlash(ideErr string, s session.Session) string {
 
 func (a App) viewHome() string {
 	inner := a.innerWidth()
-	sessions := a.reg.All()
+	allSessions := a.reg.All()
+	sessions := a.filteredSessions(allSessions)
 	a.clampHomeCursor(len(sessions))
 
-	header := a.homeHeader(inner, sessions)
+	header := a.homeHeader(inner, allSessions)
 
-	if len(sessions) == 0 {
+	if len(allSessions) == 0 {
 		body := a.emptyState(inner)
 		return a.frame(header, body, "", [][2]string{{"/", "command"}, {"Esc", "exit"}}, true)
+	}
+
+	if len(sessions) == 0 && a.searchFilter != "" {
+		body := "\n" + "      " + stDimmer.Render("no sessions matching \""+a.searchFilter+"\"")
+		keys := [][2]string{{"Esc", "clear search"}}
+		return a.frame(header, body, "", keys, true)
 	}
 
 	rows := make([]string, len(sessions))
@@ -253,8 +400,8 @@ func (a App) viewHome() string {
 		rows[i] = a.renderRow(i+1, s, i == a.homeCursor, inner)
 	}
 	// Each row is 2 lines; keep the selected row visible within the body region.
-	// Chrome: header (1) + leading blank (1) + padding (1) + cmdbar (3) + flash (1) + status (2) = 9.
-	maxRows := (a.height - 9) / 2
+	// Chrome: header (1) + leading blank (1) + padding (1) + cmdbar (3) + keys (1) + flash (1) + status (2) = 11.
+	maxRows := (a.height - 11) / 2
 	if maxRows < 1 {
 		maxRows = 1
 	}
@@ -268,20 +415,23 @@ func (a App) viewHome() string {
 	if scrollDown {
 		below := len(rows) - (a.homeCursor + maxRows/2 + 1)
 		if below < 1 {
-			below = len(rows) - len(visible) // fallback
+			below = len(rows) - len(visible)
 		}
 		parts = append(parts, "      "+stDimmer.Render(fmt.Sprintf("↓ %d more", below)))
 	}
 
 	body := "\n" + strings.Join(parts, "\n") + "\n"
 
-	// The status bar shows hotkeys only — the context label was just noise on
-	// home. The one exception is the remove confirmation, where the keys (y/n)
-	// don't say what's being deleted, so we keep that prompt on the left.
 	ctx := ""
 	keys := [][2]string{{"↑↓", "navigate"}, {"o", "open IDE"}, {"x", "remove"}, {"/", "command"}, {"Esc", "exit"}}
-	if s, ok := a.selected(sessions); ok && s.State == session.StateInactive {
+	if s, ok := a.selectedFrom(sessions); ok && s.State == session.StateInactive {
 		keys = [][2]string{{"↑↓", "navigate"}, {"enter", "relaunch"}, {"o", "open IDE"}, {"x", "remove"}, {"/", "command"}, {"Esc", "exit"}}
+	}
+	if a.searchMode {
+		keys = [][2]string{{"↑↓", "navigate"}, {"Esc", "clear search"}}
+		if s, ok := a.selectedFrom(sessions); ok && s.State == session.StateInactive {
+			keys = [][2]string{{"↑↓", "navigate"}, {"enter", "relaunch"}, {"Esc", "clear search"}}
+		}
 	}
 	if a.cmdMode {
 		keys = [][2]string{{"enter", "run"}, {"Esc", "cancel"}}
