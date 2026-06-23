@@ -8,29 +8,60 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"command-center/internal/config"
 )
 
 // hookEvents maps each Claude Code hook event to the fleet state subcommand it
-// triggers (`fleet hook <state>`). This is the doc-backed mapping from §9.
+// triggers (`fleet hook <state>`). These are written into fleet's own scoped
+// settings file and injected per-launch via `claude --settings` (§9) — never into
+// the user's global ~/.claude/settings.json. Notification/needs-input was dropped:
+// fleet tracks only Running / Finished / Inactive.
 var hookEvents = []struct{ Event, State string }{
 	{"UserPromptSubmit", "running"},
 	{"Stop", "finished"},
-	{"Notification", "needs-input"},
 	{"SessionEnd", "inactive"},
 }
 
-// stateArgs is the closed set of fleet hook state args, used to recognize fleet's
-// own hook entries on uninstall regardless of the binary's path or name.
+// stateArgs is the closed set of state args fleet recognizes. It deliberately
+// still includes the retired "needs-input" so the legacy-cleanup sweep
+// (removeLegacyGlobalHooks) recognizes and removes hooks an older fleet wrote
+// into ~/.claude/settings.json, even though fleet no longer installs that event.
 var stateArgs = map[string]bool{"running": true, "finished": true, "needs-input": true, "inactive": true}
 
-// settingsPath is ~/.claude/settings.json — the global, consented hook location
-// (§9: keeps hooks out of every repo/worktree).
+// settingsPath is ~/.claude/settings.json — the global location older fleet
+// versions installed into. Fleet no longer writes here; it is read only to sweep
+// those legacy entries out (removeLegacyGlobalHooks).
 func settingsPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(home, ".claude", "settings.json"), nil
+}
+
+// scopedSettingsPath is ~/.config/fleet/claude/settings.json — fleet's own
+// settings file, injected into only fleet-launched sessions via
+// `claude --settings`. It lives under fleet's config root, never in a repo and
+// never in the user's global Claude config, so it cannot fire on (or error in)
+// unrelated Claude Code sessions.
+func scopedSettingsPath() (string, error) {
+	root, err := config.Root()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "claude", "settings.json"), nil
+}
+
+// scopedSettingsExists reports whether the scoped settings file is present, so
+// LaunchSpec only passes --settings when there is something to point at.
+func scopedSettingsExists() bool {
+	path, err := scopedSettingsPath()
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(path)
+	return err == nil
 }
 
 // fleetExe is the absolute path to the running fleet binary, used as the hook
@@ -120,17 +151,6 @@ func saveSettings(m map[string]any) error {
 	return os.Rename(name, path)
 }
 
-// hooksMap returns the (event -> []group) map under "hooks", creating it if
-// absent. Returns the settings map's live sub-map so mutations stick.
-func hooksMap(settings map[string]any) map[string]any {
-	if h, ok := settings["hooks"].(map[string]any); ok {
-		return h
-	}
-	h := map[string]any{}
-	settings["hooks"] = h
-	return h
-}
-
 // dropFleetGroups removes fleet's command-hooks from one event's group slice,
 // dropping any group left with no hooks. Non-fleet groups/hooks are preserved
 // exactly, including their matcher.
@@ -182,27 +202,68 @@ func newFleetGroup(state string) map[string]any {
 	}
 }
 
-// install merges fleet's 4 hooks into settings.json idempotently: it first
-// strips any prior fleet entries (so re-install with a new binary path refreshes
-// the command), then appends a fresh group per event, leaving the user's own
-// hooks intact.
-func install() error {
-	settings, err := loadSettings()
+// writeScopedSettings (re)writes fleet's scoped settings file with the current
+// fleet binary path, returning its path. Rewriting on every call means the hook
+// command can never go stale (the old global install's failure mode: a moved or
+// rebuilt binary left a dead command firing in every session). The file contains
+// nothing but fleet's hooks, so injecting it via --settings adds exactly fleet's
+// tracking to a session and nothing else.
+func writeScopedSettings() (string, error) {
+	path, err := scopedSettingsPath()
+	if err != nil {
+		return "", err
+	}
+	hooks := map[string]any{}
+	for _, he := range hookEvents {
+		hooks[he.Event] = []any{newFleetGroup(he.State)}
+	}
+	data, err := json.MarshalIndent(map[string]any{"hooks": hooks}, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".settings-*.json")
+	if err != nil {
+		return "", err
+	}
+	name := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(name)
+		return "", err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(name)
+		return "", err
+	}
+	if err := os.Rename(name, path); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// removeScopedSettings deletes fleet's scoped settings file. A missing file is
+// not an error.
+func removeScopedSettings() error {
+	path, err := scopedSettingsPath()
 	if err != nil {
 		return err
 	}
-	hooks := hooksMap(settings)
-	for _, he := range hookEvents {
-		groups := dropFleetGroups(asGroupSlice(hooks[he.Event]))
-		groups = append(groups, newFleetGroup(he.State))
-		hooks[he.Event] = groups
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
 	}
-	return saveSettings(settings)
+	return nil
 }
 
-// uninstall removes only fleet's hook entries, leaving everything else — and an
-// otherwise-empty "hooks" map — as it was.
-func uninstall() error {
+// removeLegacyGlobalHooks strips any fleet hook an older version installed into
+// the user's global ~/.claude/settings.json — the entries that used to fire (and
+// error) in every unrelated Claude Code session. It sweeps every event, not just
+// the ones fleet writes today, so retired events (e.g. Notification) are caught
+// too. Non-fleet hooks and unrelated settings are preserved exactly; an event
+// left empty is removed. Missing file → nothing to do.
+func removeLegacyGlobalHooks() error {
 	settings, err := loadSettings()
 	if err != nil {
 		return err
@@ -211,20 +272,30 @@ func uninstall() error {
 	if !ok {
 		return nil // nothing of ours to remove
 	}
-	for _, he := range hookEvents {
-		groups := dropFleetGroups(asGroupSlice(hooks[he.Event]))
-		if len(groups) == 0 {
-			delete(hooks, he.Event)
-		} else {
-			hooks[he.Event] = groups
+	changed := false
+	for event := range hooks {
+		before := asGroupSlice(hooks[event])
+		groups := dropFleetGroups(before)
+		if len(groups) == len(before) {
+			continue // no fleet hook in this event
 		}
+		changed = true
+		if len(groups) == 0 {
+			delete(hooks, event)
+		} else {
+			hooks[event] = groups
+		}
+	}
+	if !changed {
+		return nil // don't rewrite the user's file when we touched nothing
 	}
 	return saveSettings(settings)
 }
 
-// installed reports whether every fleet hook event currently carries a fleet
-// command — used to show accurate onboarding status and to gate re-runs.
-func installed() bool {
+// legacyGlobalHooksPresent reports whether any fleet hook still lingers in the
+// global ~/.claude/settings.json (from a pre-`--settings` fleet). Used only to
+// decide whether the migration sweep has anything to do.
+func legacyGlobalHooksPresent() bool {
 	settings, err := loadSettings()
 	if err != nil {
 		return false
@@ -233,12 +304,12 @@ func installed() bool {
 	if !ok {
 		return false
 	}
-	for _, he := range hookEvents {
-		if !eventHasFleetHook(asGroupSlice(hooks[he.Event])) {
-			return false
+	for event := range hooks {
+		if eventHasFleetHook(asGroupSlice(hooks[event])) {
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 func eventHasFleetHook(groups []any) bool {

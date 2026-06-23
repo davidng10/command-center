@@ -31,7 +31,7 @@ func main() {
 
 	case "hook": // `fleet hook <state>` — the Claude tracker writer (reads stdin)
 		if len(os.Args) < 3 {
-			fmt.Fprintln(os.Stderr, "usage: fleet hook <running|finished|needs-input|inactive>")
+			fmt.Fprintln(os.Stderr, "usage: fleet hook <running|finished|inactive>")
 			os.Exit(2)
 		}
 		// A hook must never fail the agent's turn — report to stderr, exit 0.
@@ -77,7 +77,7 @@ func installDefault() error {
 	if err := p.Install(); err != nil {
 		return err
 	}
-	fmt.Printf("installed %s hooks\n", p.Name())
+	fmt.Printf("configured %s status tracking (scoped to fleet sessions; swept any legacy global hooks)\n", p.Name())
 	return nil
 }
 
@@ -89,7 +89,7 @@ func uninstallDefault() error {
 	if err := p.Uninstall(); err != nil {
 		return err
 	}
-	fmt.Printf("removed %s hooks\n", p.Name())
+	fmt.Printf("removed %s status tracking (scoped settings + any legacy global hooks)\n", p.Name())
 	return nil
 }
 
@@ -118,8 +118,8 @@ func printHelp() {
     $ %[1]s                 Launch the home dashboard (all sessions, live state)
     $ %[1]s --new [branch]  Jump straight into the new-session wizard
     $ %[1]s setup           Re-run first-run onboarding (provider + hooks)
-    $ %[1]s install         Install the agent status hooks
-    $ %[1]s uninstall       Remove the agent status hooks
+    $ %[1]s install         Set up status tracking (scoped to fleet sessions)
+    $ %[1]s uninstall       Remove status tracking + any legacy global hooks
     $ %[1]s --help
     $ %[1]s --version
 

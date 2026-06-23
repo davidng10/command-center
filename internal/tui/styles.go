@@ -40,8 +40,6 @@ func stateColor(st session.State) lipgloss.Color {
 		return cRun
 	case session.StateFinished:
 		return cDone
-	case session.StateNeedsInput:
-		return cInfo
 	default:
 		return cInact
 	}

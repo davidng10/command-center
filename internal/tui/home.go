@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"command-center/internal/session"
+	"command-center/internal/term"
 	"command-center/internal/worktree"
 )
 
@@ -64,7 +65,14 @@ func (a App) updateHome(m tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.enterCmdMode()
 	case "enter":
 		if s, ok := a.selected(sessions); ok {
-			a.flash = viewFlash(openIDE(a.global.IDE, s.WorktreePath), s)
+			if s.State == session.StateInactive {
+				return a.relaunchSession(s)
+			}
+			if e := openIDE(a.global.IDE, s.WorktreePath); e != "" {
+				a.flash = stWarn(e)
+			} else {
+				a.flash = stOK("opened " + s.Branch + " in IDE")
+			}
 		}
 	case "o":
 		if s, ok := a.selected(sessions); ok {
@@ -191,6 +199,34 @@ func (a App) removeSession(id string) App {
 	return a
 }
 
+// relaunchSession spawns a fresh agent terminal for an Inactive session,
+// reusing the existing worktree and branch.
+func (a App) relaunchSession(s session.Session) (tea.Model, tea.Cmd) {
+	if a.prov == nil {
+		a.flash = stWarn("no provider configured")
+		return a, nil
+	}
+	launch := a.prov.LaunchSpec(s)
+	if launch.Program == "" {
+		a.flash = stWarn("provider returned no launch command")
+		return a, nil
+	}
+	pid, err := term.Spawn(launch.Dir, launch.Program, launch.Args, a.global.Terminal)
+	if err != nil {
+		a.flash = stWarn("relaunch failed: " + err.Error())
+		return a, nil
+	}
+	now := time.Now()
+	a.reg.Update(s.ID, func(s *session.Session) {
+		s.State = session.StateRunning
+		s.PID = pid
+		s.LastActivity = now
+		s.CreatedAt = now
+	})
+	a.flash = stOK("relaunched " + s.Branch)
+	return a, nil
+}
+
 func viewFlash(ideErr string, s session.Session) string {
 	if ideErr != "" {
 		return stWarn(ideErr)
@@ -230,7 +266,11 @@ func (a App) viewHome() string {
 	// home. The one exception is the remove confirmation, where the keys (y/n)
 	// don't say what's being deleted, so we keep that prompt on the left.
 	ctx := ""
-	keys := [][2]string{{"↑↓", "navigate"}, {"enter", "view"}, {"o", "open IDE"}, {"x", "remove"}, {"/", "command"}, {"Esc", "exit"}}
+	enterHint := "open IDE"
+	if s, ok := a.selected(sessions); ok && s.State == session.StateInactive {
+		enterHint = "relaunch"
+	}
+	keys := [][2]string{{"↑↓", "navigate"}, {"enter", enterHint}, {"o", "open IDE"}, {"x", "remove"}, {"/", "command"}, {"Esc", "exit"}}
 	if a.cmdMode {
 		keys = [][2]string{{"enter", "run"}, {"Esc", "cancel"}}
 	}
@@ -332,8 +372,6 @@ func activityPhrase(s session.Session, now time.Time) string {
 	switch s.State {
 	case session.StateRunning:
 		return "working…"
-	case session.StateNeedsInput:
-		return "awaiting your input"
 	case session.StateFinished:
 		return "idle " + s.ActivityAge(now) + " · ready to review"
 	default:

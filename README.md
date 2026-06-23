@@ -30,7 +30,7 @@ Viewing active sessions · task/SP-12392…   ↑↓ navigate  enter view  o ope
 Type `/new`, answer the wizard (name → directory → base branch → setup →
 review), and `fleet` creates the worktree and launches the agent **in a new
 terminal window**. `fleet` keeps your terminal and tracks each agent's state —
-Running / Finished / Needs input / Inactive — live.
+Running / Finished / Inactive — live.
 
 ---
 
@@ -60,10 +60,12 @@ branches.
 
 If `~/.local/bin` isn't on your PATH, the script tells you the line to add.
 
-On first launch `fleet` runs a one-time **onboarding**: pick your provider and
-(recommended) let it install 4 status hooks into `~/.claude/settings.json` so it
-can show live agent state. The merge is consented and reversible (`fleet
-uninstall`); skipping it leaves `fleet` with Active/Inactive tracking only.
+On first launch `fleet` runs a one-time **onboarding**: just pick your provider.
+Status tracking is automatic and needs no setup — `fleet` injects its status
+hooks **only into the sessions it launches** (via `claude --settings`), so your
+global `~/.claude/settings.json` is never modified and unrelated Claude Code
+sessions never see them. (Upgrading from an older `fleet`? It removes the global
+hooks a previous version installed, automatically, on next launch.)
 
 ### Requirements at runtime
 
@@ -94,9 +96,9 @@ release, run `./build.sh v1.2.3` and upload `dist/*` to a GitHub Release.
 ```bash
 fleet              # launch the home dashboard (all sessions, live state)
 fleet --new [b]    # jump straight into the new-session wizard (optional branch prefill)
-fleet setup        # re-run first-run onboarding (provider + hooks)
-fleet install      # install the agent status hooks
-fleet uninstall    # remove the agent status hooks
+fleet setup        # re-run first-run onboarding (provider)
+fleet install      # (re)write the scoped status hooks + sweep any legacy global hooks
+fleet uninstall    # remove the scoped status hooks + any legacy global hooks
 fleet --help
 fleet --version
 ```
@@ -141,6 +143,7 @@ Two layers, neither of which ever lands in your repo:
 ├── config.json              # setupComplete, defaultProvider, ide, terminal
 ├── sessions.json            # the session registry (persisted, survives restarts)
 ├── prefs.json               # "last used" cache: recent dirs, per-repo base & setup
+├── claude/settings.json     # scoped status hooks, injected via `claude --settings`
 └── state/<session>.json     # transient per-session activity, written by `fleet hook`
 ```
 
@@ -165,21 +168,29 @@ automatically on first run.
 
 ## How live status works
 
-When you install hooks, fleet merges 4 entries into `~/.claude/settings.json`,
-each invoking the fleet binary itself (no bash/jq, cross-platform):
+fleet writes 3 status hooks into its own `~/.config/fleet/claude/settings.json`
+(each invoking the fleet binary itself — no bash/jq, cross-platform) and launches
+the agent with `claude --settings ~/.config/fleet/claude/settings.json`. The hooks
+therefore fire **only for the sessions fleet launches** — never for unrelated
+Claude Code sessions, and never by modifying your global `~/.claude/settings.json`:
 
 | Claude hook event  | `fleet hook …`  | state          |
 | ------------------ | --------------- | -------------- |
 | `UserPromptSubmit` | `running`       | **Running**    |
 | `Stop`             | `finished`      | **Finished**   |
-| `Notification`     | `needs-input`   | **Needs input**|
 | `SessionEnd`       | `inactive`      | **Inactive**   |
 
 `fleet hook <state>` reads the hook payload on stdin, maps `cwd` → worktree →
-session, and atomically writes `~/.config/fleet/state/<session_id>.json`. The
-TUI watches that directory and updates the matching row. A hard kill (closing
-the terminal) fires no hook; fleet falls back to process liveness where a PID is
+session (resolving symlinks, so a hook's canonical cwd still matches), and
+atomically writes `~/.config/fleet/state/<session_id>.json`. The TUI watches that
+directory and updates the matching row. A hard kill (closing the terminal) fires
+no `SessionEnd` hook; fleet falls back to process liveness where a PID is
 available.
+
+The hook command is rewritten on every launch with the current binary path, so a
+rebuilt or relocated `fleet` can never leave a dead command behind. Earlier
+versions installed these hooks globally into `~/.claude/settings.json`; fleet now
+sweeps those out automatically on launch (or via `fleet uninstall`).
 
 ---
 

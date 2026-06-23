@@ -142,13 +142,7 @@ func TestOnboardingFlowRendersAndCompletes(t *testing.T) {
 	if !strings.Contains(a.View(), "Choose your agent provider") {
 		t.Fatalf("provider step missing:\n%s", a.View())
 	}
-	a = send(a, special(tea.KeyEnter)) // provider -> hooks
-	if !strings.Contains(a.View(), "Set up status tracking") {
-		t.Fatalf("hooks step missing:\n%s", a.View())
-	}
-	// Choose "Skip for now" so the test doesn't touch real settings beyond temp HOME.
-	a = send(a, special(tea.KeyDown))
-	a = send(a, special(tea.KeyEnter)) // hooks -> done
+	a = send(a, special(tea.KeyEnter)) // provider -> done (status tracking is automatic now)
 	if !strings.Contains(a.View(), "You're all set") {
 		t.Fatalf("done step missing:\n%s", a.View())
 	}

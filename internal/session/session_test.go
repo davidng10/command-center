@@ -8,7 +8,7 @@ import (
 )
 
 func TestStateWireRoundTrip(t *testing.T) {
-	for _, st := range []State{StateRunning, StateFinished, StateNeedsInput, StateInactive} {
+	for _, st := range []State{StateRunning, StateFinished, StateInactive} {
 		data, err := json.Marshal(st)
 		if err != nil {
 			t.Fatal(err)
@@ -67,11 +67,11 @@ func TestRegistryRoundTrip(t *testing.T) {
 	}
 
 	// Activity update learns the agent session id and flips state.
-	updated, ok, err := r2.ApplyActivity("/wt/b", "agent-xyz", StateNeedsInput, newer)
+	updated, ok, err := r2.ApplyActivity("/wt/b", "agent-xyz", StateRunning, newer)
 	if err != nil || !ok {
 		t.Fatalf("ApplyActivity ok=%v err=%v", ok, err)
 	}
-	if updated.AgentSession != "agent-xyz" || updated.State != StateNeedsInput {
+	if updated.AgentSession != "agent-xyz" || updated.State != StateRunning {
 		t.Fatalf("activity not applied: %+v", updated)
 	}
 

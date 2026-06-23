@@ -13,20 +13,19 @@ import (
 type State int
 
 const (
-	StateRunning    State = iota // agent generating / working
-	StateFinished                // idle, awaiting user input
-	StateNeedsInput              // waiting on permission / approval
-	StateInactive                // session ended or process gone
+	StateRunning  State = iota // agent generating / working
+	StateFinished              // idle, the chat has settled
+	StateInactive              // no claude instance for this worktree
 )
 
 // stateNames is the on-disk / hook-arg spelling of each state. The wire form is
 // a stable string (not the int) so sessions.json and `fleet hook <state>` stay
-// readable and reorder-proof.
+// readable and reorder-proof. ("active" is not a state — it is simply any
+// non-Inactive session; the dashboard derives it.)
 var stateNames = map[State]string{
-	StateRunning:    "running",
-	StateFinished:   "finished",
-	StateNeedsInput: "needs-input",
-	StateInactive:   "inactive",
+	StateRunning:  "running",
+	StateFinished: "finished",
+	StateInactive: "inactive",
 }
 
 // String returns the wire spelling ("running", …).
@@ -44,8 +43,6 @@ func (s State) Label() string {
 		return "Running"
 	case StateFinished:
 		return "Finished"
-	case StateNeedsInput:
-		return "Needs input"
 	default:
 		return "Inactive"
 	}

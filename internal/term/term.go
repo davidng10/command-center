@@ -26,13 +26,21 @@ func Spawn(dir, program string, args []string, template string) (int, error) {
 	if err := cmd.Start(); err != nil {
 		return 0, fmt.Errorf("spawn terminal %q: %w", name, err)
 	}
+	// Reap the launcher so it doesn't linger as a zombie; the GUI terminal it
+	// opened lives on independently.
+	go func() { _ = cmd.Wait() }()
+	// On macOS/Windows the launcher (osascript, wt, cmd /c start) is a
+	// short-lived intermediary — its PID is NOT the agent's. Returning it would
+	// make ReconcileLiveness see a dead PID and instantly stamp the session
+	// Inactive. Return 0 so liveness is left to the SessionEnd hook instead,
+	// which is what the design intends for GUI-terminal spawns.
+	if isIndirectLauncher(name) {
+		return 0, nil
+	}
 	pid := 0
 	if cmd.Process != nil {
 		pid = cmd.Process.Pid
 	}
-	// Reap the launcher so it doesn't linger as a zombie; the GUI terminal it
-	// opened lives on independently.
-	go func() { _ = cmd.Wait() }()
 	return pid, nil
 }
 
@@ -114,6 +122,22 @@ func joinCommand(program string, args []string) string {
 // for POSIX shells and AppleScript do-script strings.
 func singleQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// isIndirectLauncher reports whether name is a known GUI-terminal intermediary
+// whose PID dies immediately after it tells the real terminal to open. These must
+// NOT be used for process-liveness checks.
+func isIndirectLauncher(name string) bool {
+	switch {
+	case name == "osascript":
+		return true // macOS: tells Terminal.app to open a window
+	case name == "cmd" || name == "cmd.exe":
+		return true // Windows: "cmd /c start …" exits immediately
+	case strings.HasSuffix(name, "/wt") || strings.HasSuffix(name, "/wt.exe") || name == "wt" || name == "wt.exe":
+		return true // Windows Terminal: opens a tab and exits
+	default:
+		return false
+	}
 }
 
 func firstOnPath(cands ...string) string {

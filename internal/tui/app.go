@@ -86,9 +86,11 @@ func Run(opts Options) error {
 	global := config.LoadGlobal()
 	prov := resolveDefaultProvider(global)
 
-	// Keep installed hooks fresh (idempotent; no-op write when unchanged). Never
-	// force-installs for users who chose to skip during onboarding.
-	if prov != nil && prov.Installed() {
+	// Write fleet's scoped status hooks fresh (so the hook command always points at
+	// the current binary) and sweep any hooks an older fleet left in the user's
+	// global ~/.claude/settings.json — those fired, and errored, in every unrelated
+	// Claude Code session. Idempotent and non-invasive, so it runs every launch.
+	if prov != nil {
 		_ = prov.Install()
 	}
 

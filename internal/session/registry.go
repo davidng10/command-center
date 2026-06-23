@@ -54,16 +54,27 @@ func (r *Registry) Get(id string) (Session, bool) {
 	return Session{}, false
 }
 
-// FindByWorktree returns the session whose worktree path matches dir (cleaned),
-// which is how a hook firing's cwd maps back to a fleet session.
+// FindByWorktree returns the session whose worktree path matches dir, which is
+// how a hook firing's cwd maps back to a fleet session. Both sides are resolved
+// to a canonical form so a hook's OS-canonical cwd (e.g. macOS reports
+// /private/tmp/x) still matches a stored /tmp/x.
 func (r *Registry) FindByWorktree(dir string) (Session, bool) {
-	want := filepath.Clean(dir)
+	want := canonPath(dir)
 	for _, s := range r.sessions {
-		if filepath.Clean(s.WorktreePath) == want {
+		if canonPath(s.WorktreePath) == want {
 			return s, true
 		}
 	}
 	return Session{}, false
+}
+
+// canonPath resolves dir for comparison: symlinks evaluated when the path exists,
+// falling back to a lexically cleaned path otherwise (e.g. a removed worktree).
+func canonPath(dir string) string {
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		return resolved
+	}
+	return filepath.Clean(dir)
 }
 
 // Add appends a session and persists.

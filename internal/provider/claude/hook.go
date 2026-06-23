@@ -38,7 +38,7 @@ type stateFile struct {
 // agent is unaffected either way.
 func HandleHook(stateArg string, r io.Reader) error {
 	if !stateArgs[stateArg] {
-		return fmt.Errorf("unknown hook state %q (want running|finished|needs-input|inactive)", stateArg)
+		return fmt.Errorf("unknown hook state %q (want running|finished|inactive)", stateArg)
 	}
 	raw, err := io.ReadAll(r)
 	if err != nil {
