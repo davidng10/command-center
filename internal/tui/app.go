@@ -25,9 +25,11 @@ import (
 type screen int
 
 const (
-	scrOnboard screen = iota
-	scrHome
+	scrOnboard    screen = iota
+	scrHome                     // repo list
+	scrRepoDetail               // worktrees inside a repo
 	scrWizard
+	scrAddRepo                  // /add directory browser
 )
 
 // Options configures how the TUI launches.
@@ -53,19 +55,63 @@ type App struct {
 	tickCount int
 	flash     string // transient feedback line (errors / confirmations)
 
-	// home
-	homeCursor      int
+	// home (repo list)
+	homeCursor  int
+	repoEntries []repoEntry
+
+	// repo detail
+	selectedRepo string
+	detailItems  []worktreeItem
+	detailCursor int
+
+	// shared input modes
 	cmdMode         bool
 	searchMode      bool
-	searchFilter    string // current live filter text (applied to branch names)
+	searchFilter    string
 	cmdInput        textinput.Model
-	confirmRemoveID string // non-empty ⇒ awaiting y/n to remove this session
+	confirmRemoveID string
 
-	// wizard / onboarding (nil unless on that screen)
+	// wizard / onboarding / add-repo (nil unless on that screen)
 	wiz *wizardModel
 	onb *onboardModel
+	add *addRepoModel
 
-	busyLabel string // non-empty → an async operation is in progress (shown as spinner + label)
+	busyLabel string
+}
+
+// repoEntry is one row on the repo list home screen.
+type repoEntry struct {
+	Path          string
+	Name          string
+	WorktreeCount int
+}
+
+// refreshRepos loads repos from config, auto-populates from existing sessions
+// on first run, and caches worktree counts.
+func (a *App) refreshRepos() {
+	repos := config.LoadRepos()
+	if len(repos) == 0 {
+		seen := map[string]bool{}
+		for _, s := range a.reg.All() {
+			if s.RepoDir != "" && !seen[s.RepoDir] {
+				seen[s.RepoDir] = true
+				repos = append(repos, s.RepoDir)
+			}
+		}
+		if len(repos) > 0 {
+			_ = config.SaveRepos(repos)
+		}
+	}
+
+	a.repoEntries = make([]repoEntry, 0, len(repos))
+	for _, r := range repos {
+		wts, _ := worktree.ListWorktrees(r)
+		a.repoEntries = append(a.repoEntries, repoEntry{
+			Path:          r,
+			Name:          filepath.Base(r),
+			WorktreeCount: len(wts),
+		})
+	}
 }
 
 // Messages.
@@ -153,6 +199,7 @@ func NewApp(reg *session.Registry, prov provider.Provider, global config.Global,
 		reg: reg, prov: prov, global: global, acts: acts,
 		now: time.Now(), pulseOn: true, cmdInput: ci,
 	}
+	a.refreshRepos()
 	switch {
 	case opts.ForceSetup:
 		a.scr = scrOnboard
@@ -202,30 +249,48 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.pulseOn = !a.pulseOn
 		}
 		if a.tickCount%10 == 0 {
-			_, _ = a.reg.ReconcileLiveness()
+			changed, _ := a.reg.ReconcileLiveness()
+			if changed && a.scr == scrRepoDetail && a.selectedRepo != "" {
+				a.refreshDetailItems()
+			}
 		}
 		return a, tickCmd()
 
 	case activityMsg:
-		// Map the firing's cwd back to a session and record the new state.
 		_, _, _ = a.reg.ApplyActivity(m.Cwd, m.AgentSession, m.State, m.At)
+		if a.scr == scrRepoDetail && a.selectedRepo != "" {
+			a.refreshDetailItems()
+		}
 		return a, waitActivity(a.acts)
 
 	case createResultMsg:
 		a.busyLabel = ""
 		if m.err != nil {
 			a.flash = stErr("create failed: " + m.err.Error())
-			a.scr = scrHome
+			if a.selectedRepo != "" {
+				a.scr = scrRepoDetail
+			} else {
+				a.scr = scrHome
+			}
 			a.wiz = nil
 			return a, nil
 		}
 		_ = a.reg.Add(m.sess)
-		a.homeCursor = 0
 		a.flash = stOK("created " + m.sess.Branch)
 		if m.warn != "" {
 			a.flash = stWarn(m.warn)
 		}
-		a.scr = scrHome
+		// Auto-register repo and navigate to its detail view.
+		if m.sess.RepoDir != "" {
+			_ = config.AddRepo(m.sess.RepoDir)
+			a.selectedRepo = m.sess.RepoDir
+			a.refreshRepos()
+			a.refreshDetailItems()
+			a.detailCursor = 0
+			a.scr = scrRepoDetail
+		} else {
+			a.scr = scrHome
+		}
 		a.wiz = nil
 		return a, nil
 
@@ -236,7 +301,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			a.flash = stOK("removed " + m.branch)
 		}
-		a.clampHomeCursor(len(a.reg.All()))
+		if a.scr == scrRepoDetail && a.selectedRepo != "" {
+			a.refreshDetailItems()
+			a.clampDetailCursor(len(a.detailItems))
+		}
 		return a, nil
 
 	case relaunchResultMsg:
@@ -253,6 +321,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			s.CreatedAt = now
 		})
 		a.flash = stOK("restarted " + m.branch)
+		if a.scr == scrRepoDetail && a.selectedRepo != "" {
+			a.refreshDetailItems()
+		}
 		return a, nil
 
 	case openTermResultMsg:
@@ -271,8 +342,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch a.scr {
 		case scrHome:
 			return a.updateHome(m)
+		case scrRepoDetail:
+			return a.updateRepoDetail(m)
 		case scrWizard:
 			return a.updateWizard(m)
+		case scrAddRepo:
+			return a.updateAddRepo(m)
 		case scrOnboard:
 			return a.updateOnboard(m)
 		}
@@ -289,8 +364,12 @@ func (a App) View() string {
 	switch a.scr {
 	case scrHome:
 		return a.viewHome()
+	case scrRepoDetail:
+		return a.viewRepoDetail()
 	case scrWizard:
 		return a.viewWizard()
+	case scrAddRepo:
+		return a.viewAddRepo()
 	case scrOnboard:
 		return a.viewOnboard()
 	}
@@ -317,7 +396,7 @@ func (a App) frame(header, body, ctx string, keys [][2]string, showCmdBar bool) 
 		upper = append(upper, " "+a.flash)
 	}
 	if showCmdBar {
-		upper = append(upper, a.renderCmdBar())
+		upper = append(upper, "", a.renderCmdBar())
 	}
 	if a.cmdMode {
 		matches := matchingCommands(a.cmdInput.Value())
@@ -385,7 +464,7 @@ func (a App) renderCmdBar() string {
 	}
 	return lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder(), true, false, true, false). // top + bottom only
-		BorderForeground(cAccent).
+		BorderForeground(cDimmer).
 		Padding(0, 1).
 		Width(a.width). // span the entire terminal width, end to end
 		Render(content)
