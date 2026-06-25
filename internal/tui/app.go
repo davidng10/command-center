@@ -86,6 +86,10 @@ type relaunchResultMsg struct {
 	pid    int
 	err    string
 }
+type openTermResultMsg struct {
+	branch string
+	err    string
+}
 
 // Run loads state, wires the default provider's tracker, and runs the program.
 func Run(opts Options) error {
@@ -238,7 +242,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case relaunchResultMsg:
 		a.busyLabel = ""
 		if m.err != "" {
-			a.flash = stWarn("relaunch failed: " + m.err)
+			a.flash = stWarn("restart failed: " + m.err)
 			return a, nil
 		}
 		now := time.Now()
@@ -248,7 +252,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			s.LastActivity = now
 			s.CreatedAt = now
 		})
-		a.flash = stOK("relaunched " + m.branch)
+		a.flash = stOK("restarted " + m.branch)
+		return a, nil
+
+	case openTermResultMsg:
+		a.busyLabel = ""
+		if m.err != "" {
+			a.flash = stWarn("open terminal failed: " + m.err)
+			return a, nil
+		}
+		a.flash = stOK("opened terminal for " + m.branch)
 		return a, nil
 
 	case tea.KeyMsg:

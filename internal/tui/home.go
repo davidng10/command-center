@@ -108,6 +108,10 @@ func (a App) updateHome(m tea.KeyMsg) (tea.Model, tea.Cmd) {
 				a.flash = stOK("opened " + s.Branch + " in IDE")
 			}
 		}
+	case "t":
+		if s, ok := a.selectedFrom(filtered); ok {
+			return a.openTerminal(s)
+		}
 	case "o":
 		if s, ok := a.selectedFrom(filtered); ok {
 			if e := openIDE(a.global.IDE, s.WorktreePath); e != "" {
@@ -174,7 +178,7 @@ func isSearchKey(m tea.KeyMsg) bool {
 	r := m.Runes[0]
 	if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.' {
 		switch m.String() {
-		case "j", "k", "o", "x":
+		case "j", "k", "o", "t", "x":
 			return false // bound hotkeys
 		}
 		return true
@@ -367,6 +371,19 @@ func (a App) relaunchSession(s session.Session) (tea.Model, tea.Cmd) {
 	}
 }
 
+// openTerminal spawns a plain shell terminal at the session's worktree root.
+// The session state is not changed — it remains Inactive.
+func (a App) openTerminal(s session.Session) (tea.Model, tea.Cmd) {
+	a.busyLabel = "Opening terminal…"
+	branch, dir, terminal := s.Branch, s.WorktreePath, a.global.Terminal
+	return a, func() tea.Msg {
+		if err := term.SpawnShell(dir, terminal); err != nil {
+			return openTermResultMsg{branch: branch, err: err.Error()}
+		}
+		return openTermResultMsg{branch: branch}
+	}
+}
+
 func viewFlash(ideErr string, s session.Session) string {
 	if ideErr != "" {
 		return stWarn(ideErr)
@@ -423,14 +440,14 @@ func (a App) viewHome() string {
 	body := "\n" + strings.Join(parts, "\n") + "\n"
 
 	ctx := ""
-	keys := [][2]string{{"↑↓", "navigate"}, {"o", "open IDE"}, {"x", "remove"}, {"/", "command"}, {"Esc", "exit"}}
+	keys := [][2]string{{"↑↓", "navigate"}, {"t", "terminal"}, {"o", "open IDE"}, {"x", "remove"}, {"/", "command"}, {"Esc", "exit"}}
 	if s, ok := a.selectedFrom(sessions); ok && s.State == session.StateInactive {
-		keys = [][2]string{{"↑↓", "navigate"}, {"enter", "relaunch"}, {"o", "open IDE"}, {"x", "remove"}, {"/", "command"}, {"Esc", "exit"}}
+		keys = [][2]string{{"↑↓", "navigate"}, {"enter", "restart agent"}, {"t", "terminal"}, {"o", "open IDE"}, {"x", "remove"}, {"/", "command"}, {"Esc", "exit"}}
 	}
 	if a.searchMode {
-		keys = [][2]string{{"↑↓", "navigate"}, {"Esc", "clear search"}}
+		keys = [][2]string{{"↑↓", "navigate"}, {"t", "terminal"}, {"Esc", "clear search"}}
 		if s, ok := a.selectedFrom(sessions); ok && s.State == session.StateInactive {
-			keys = [][2]string{{"↑↓", "navigate"}, {"enter", "relaunch"}, {"Esc", "clear search"}}
+			keys = [][2]string{{"↑↓", "navigate"}, {"enter", "restart agent"}, {"t", "terminal"}, {"Esc", "clear search"}}
 		}
 	}
 	if a.cmdMode {
