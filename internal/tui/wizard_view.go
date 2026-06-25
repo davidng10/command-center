@@ -95,7 +95,7 @@ func (a App) viewWizard() string {
 		ctx = stInkB.Render("New session") + stDim.Render(" · review")
 		keys = [][2]string{{"enter", "create"}, {"Esc", "back"}}
 		if a.busyLabel != "" {
-			keys = [][2]string{{"…", "creating worktree"}}
+			keys = nil
 		}
 	}
 
