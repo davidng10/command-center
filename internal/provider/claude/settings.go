@@ -16,10 +16,10 @@ import (
 // triggers (`fleet hook <state>`). These are written into fleet's own scoped
 // settings file and injected per-launch via `claude --settings` (§9) — never into
 // the user's global ~/.claude/settings.json. Notification/needs-input was dropped:
-// fleet tracks only Running / Finished / Inactive.
+// fleet tracks only Running / Idle / Inactive.
 var hookEvents = []struct{ Event, State string }{
 	{"UserPromptSubmit", "running"},
-	{"Stop", "finished"},
+	{"Stop", "idle"},
 	{"SessionEnd", "inactive"},
 }
 
@@ -27,7 +27,7 @@ var hookEvents = []struct{ Event, State string }{
 // still includes the retired "needs-input" so the legacy-cleanup sweep
 // (removeLegacyGlobalHooks) recognizes and removes hooks an older fleet wrote
 // into ~/.claude/settings.json, even though fleet no longer installs that event.
-var stateArgs = map[string]bool{"running": true, "finished": true, "needs-input": true, "inactive": true}
+var stateArgs = map[string]bool{"running": true, "idle": true, "finished": true, "needs-input": true, "inactive": true}
 
 // settingsPath is ~/.claude/settings.json — the global location older fleet
 // versions installed into. Fleet no longer writes here; it is read only to sweep

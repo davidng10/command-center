@@ -7,6 +7,7 @@ package term
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -138,6 +139,18 @@ func isIndirectLauncher(name string) bool {
 	default:
 		return false
 	}
+}
+
+// SpawnShell opens a new terminal window at dir running the user's login shell.
+// It reuses the Spawn infrastructure (including the user's terminal template)
+// but substitutes the shell for the agent command.
+func SpawnShell(dir, template string) error {
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "sh"
+	}
+	_, err := Spawn(dir, shell, nil, template)
+	return err
 }
 
 func firstOnPath(cands ...string) string {

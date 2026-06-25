@@ -14,7 +14,7 @@ type State int
 
 const (
 	StateRunning  State = iota // agent generating / working
-	StateFinished              // idle, the chat has settled
+	StateIdle              // agent idle, waiting for user input
 	StateInactive              // no claude instance for this worktree
 )
 
@@ -24,7 +24,7 @@ const (
 // non-Inactive session; the dashboard derives it.)
 var stateNames = map[State]string{
 	StateRunning:  "running",
-	StateFinished: "finished",
+	StateIdle: "idle",
 	StateInactive: "inactive",
 }
 
@@ -41,8 +41,8 @@ func (s State) Label() string {
 	switch s {
 	case StateRunning:
 		return "Running"
-	case StateFinished:
-		return "Finished"
+	case StateIdle:
+		return "Your turn"
 	default:
 		return "Inactive"
 	}

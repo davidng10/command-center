@@ -8,40 +8,28 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"command-center/internal/config"
 	"command-center/internal/session"
 	"command-center/internal/term"
 	"command-center/internal/worktree"
 )
 
-// updateHome handles keys on the home screen across its three input modes:
-// removal-confirm, command-bar, and (default) list navigation.
+// updateHome handles keys on the home screen (repo list).
 func (a App) updateHome(m tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if a.busyLabel != "" {
-		return a, nil // ignore input while an async operation is in progress
+		return a, nil
 	}
 
-	sessions := a.reg.All()
-	a.clampHomeCursor(len(sessions))
+	entries := a.filteredRepoEntries()
+	a.clampHomeCursor(len(entries))
 
-	// 1) Confirming a removal — only y/n/esc matter.
-	if a.confirmRemoveID != "" {
-		switch m.String() {
-		case "y", "Y":
-			return a.removeSession(a.confirmRemoveID)
-		default: // n, esc, anything else cancels
-			a.confirmRemoveID = ""
-			a.flash = ""
-			return a, nil
-		}
-	}
-
-	// 2) Command-bar mode — typing a /command.
+	// Command-bar mode.
 	if a.cmdMode {
 		switch m.Type {
 		case tea.KeyEnter:
 			cmd := strings.TrimSpace(a.cmdInput.Value())
 			a.exitCmdMode()
-			return a.runCommand(cmd, sessions)
+			return a.runCommand(cmd)
 		case tea.KeyEsc:
 			a.exitCmdMode()
 			return a, nil
@@ -54,8 +42,7 @@ func (a App) updateHome(m tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, cmd
 	}
 
-	// 2b) Search mode — live-filtering sessions by branch name.
-	// Arrow keys pass through to navigation; everything else goes to the input.
+	// Search mode — live-filtering repos by name.
 	if a.searchMode {
 		switch m.Type {
 		case tea.KeyEnter, tea.KeyEsc:
@@ -67,8 +54,7 @@ func (a App) updateHome(m tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return a, nil
 		case tea.KeyDown:
-			filtered := a.filteredSessions(sessions)
-			if a.homeCursor < len(filtered)-1 {
+			if a.homeCursor < len(entries)-1 {
 				a.homeCursor++
 			}
 			return a, nil
@@ -84,45 +70,22 @@ func (a App) updateHome(m tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, cmd
 	}
 
-	// 3) Navigation mode.
-	filtered := a.filteredSessions(sessions)
+	// Navigation mode.
 	switch m.String() {
 	case "up", "k":
 		if a.homeCursor > 0 {
 			a.homeCursor--
 		}
 	case "down", "j":
-		if a.homeCursor < len(filtered)-1 {
+		if a.homeCursor < len(entries)-1 {
 			a.homeCursor++
 		}
 	case "/":
 		a.enterCmdMode()
 	case "enter":
-		if s, ok := a.selectedFrom(filtered); ok {
-			if s.State == session.StateInactive {
-				return a.relaunchSession(s)
-			}
-			if e := openIDE(a.global.IDE, s.WorktreePath); e != "" {
-				a.flash = stWarn(e)
-			} else {
-				a.flash = stOK("opened " + s.Branch + " in IDE")
-			}
+		if e, ok := a.selectedRepoEntry(entries); ok {
+			a.enterRepo(e.Path)
 		}
-	case "o":
-		if s, ok := a.selectedFrom(filtered); ok {
-			if e := openIDE(a.global.IDE, s.WorktreePath); e != "" {
-				a.flash = stWarn(e)
-			} else {
-				a.flash = stOK("opened " + s.Branch + " in IDE")
-			}
-		}
-	case "x":
-		if s, ok := a.selectedFrom(filtered); ok {
-			a.confirmRemoveID = s.ID
-			a.flash = ""
-		}
-	case "esc":
-		return a, tea.Quit
 	default:
 		if isSearchKey(m) {
 			a.enterSearchMode(m.String())
@@ -165,8 +128,7 @@ func (a *App) exitSearchMode() {
 	a.cmdInput.Blur()
 }
 
-// isSearchKey returns true for printable characters that aren't bound as
-// navigation hotkeys, so typing them starts a search filter.
+// isSearchKey returns true for printable characters that aren't bound as hotkeys.
 func isSearchKey(m tea.KeyMsg) bool {
 	if m.Type != tea.KeyRunes || len(m.Runes) == 0 {
 		return false
@@ -174,36 +136,33 @@ func isSearchKey(m tea.KeyMsg) bool {
 	r := m.Runes[0]
 	if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.' {
 		switch m.String() {
-		case "j", "k", "o", "x":
-			return false // bound hotkeys
+		case "j", "k", "o", "t", "x":
+			return false
 		}
 		return true
 	}
 	return false
 }
 
-// filteredSessions returns sessions matching the current search filter, or all
-// sessions if no filter is active.
-func (a App) filteredSessions(all []session.Session) []session.Session {
+func (a App) filteredRepoEntries() []repoEntry {
 	if a.searchFilter == "" {
-		return all
+		return a.repoEntries
 	}
 	q := strings.ToLower(a.searchFilter)
-	var out []session.Session
-	for _, s := range all {
-		if strings.Contains(strings.ToLower(s.Branch), q) {
-			out = append(out, s)
+	var out []repoEntry
+	for _, r := range a.repoEntries {
+		if strings.Contains(strings.ToLower(r.Name), q) {
+			out = append(out, r)
 		}
 	}
 	return out
 }
 
-// selectedFrom returns the session under the cursor from a (possibly filtered) list.
-func (a App) selectedFrom(sessions []session.Session) (session.Session, bool) {
-	if a.homeCursor < 0 || a.homeCursor >= len(sessions) {
-		return session.Session{}, false
+func (a App) selectedRepoEntry(entries []repoEntry) (repoEntry, bool) {
+	if a.homeCursor < 0 || a.homeCursor >= len(entries) {
+		return repoEntry{}, false
 	}
-	return sessions[a.homeCursor], true
+	return entries[a.homeCursor], true
 }
 
 func (a *App) clampHomeCursor(n int) {
@@ -215,29 +174,22 @@ func (a *App) clampHomeCursor(n int) {
 	}
 }
 
-func (a App) selected(sessions []session.Session) (session.Session, bool) {
-	if a.homeCursor < 0 || a.homeCursor >= len(sessions) {
-		return session.Session{}, false
-	}
-	return sessions[a.homeCursor], true
-}
+// ---- commands ---------------------------------------------------------------
 
-// commandEntry is one item in the command palette.
 type commandEntry struct {
 	Name string
 	Desc string
 }
 
-// commands is the palette shown when the user presses /.
 var commands = []commandEntry{
-	{"/new", "create a new agent session"},
-	{"/open", "open session worktree in IDE"},
-	{"/rm", "remove session and worktree"},
+	{"/new", "create a new worktree"},
+	{"/add", "add a repo to fleet"},
+	{"/open", "open worktree in IDE"},
+	{"/rm", "remove repo or worktree"},
 	{"/setup", "re-run onboarding"},
 	{"/quit", "exit fleet"},
 }
 
-// matchingCommands returns commands whose name starts with the typed prefix.
 func matchingCommands(input string) []commandEntry {
 	prefix := strings.ToLower(strings.TrimSpace(input))
 	if prefix == "" || prefix == "/" {
@@ -255,7 +207,6 @@ func matchingCommands(input string) []commandEntry {
 	return out
 }
 
-// renderCommandPalette draws the filtered command list below the cmd bar.
 func renderCommandPalette(matches []commandEntry) string {
 	if len(matches) == 0 {
 		return "  " + stDimmer.Render("no matching commands")
@@ -267,62 +218,95 @@ func renderCommandPalette(matches []commandEntry) string {
 	return strings.Join(lines, "\n")
 }
 
-// runCommand parses and dispatches a /command typed in the command bar.
-func (a App) runCommand(cmd string, sessions []session.Session) (tea.Model, tea.Cmd) {
+// runCommand dispatches a /command typed in the command bar. Context-aware:
+// behaviour varies depending on whether we're on the repo list or detail view.
+func (a App) runCommand(cmd string) (tea.Model, tea.Cmd) {
 	if cmd == "" {
 		return a, nil
 	}
 	fields := strings.Fields(cmd)
 	verb := fields[0]
-	arg := strings.TrimSpace(strings.TrimPrefix(cmd, verb))
-
-	pick := func() (session.Session, bool) {
-		if arg != "" {
-			return a.reg.Get(arg)
-		}
-		return a.selected(sessions)
-	}
 
 	switch verb {
 	case "/new":
-		a.scr = scrWizard
-		a.wiz = newWizard(arg, a.prov, a.global)
+		if a.scr == scrRepoDetail && a.selectedRepo != "" {
+			repo := worktree.ContextFromRoot(a.selectedRepo)
+			cfg := config.Load(a.selectedRepo)
+			a.scr = scrWizard
+			a.wiz = newWizardForRepo(repo, cfg, a.prov, a.global)
+		} else if len(a.repoEntries) > 0 {
+			entries := a.filteredRepoEntries()
+			if e, ok := a.selectedRepoEntry(entries); ok {
+				a.enterRepo(e.Path)
+				repo := worktree.ContextFromRoot(a.selectedRepo)
+				cfg := config.Load(a.selectedRepo)
+				a.scr = scrWizard
+				a.wiz = newWizardForRepo(repo, cfg, a.prov, a.global)
+			}
+		} else {
+			a.flash = stWarn("add a repo first (/add)")
+		}
 		return a, nil
+
+	case "/add":
+		a.scr = scrAddRepo
+		a.add = newAddRepoModel()
+		return a, nil
+
 	case "/setup":
 		a.scr = scrOnboard
 		a.onb = newOnboard(a.prov)
 		return a, nil
+
 	case "/quit", "/exit":
 		return a, tea.Quit
+
 	case "/open":
-		if s, ok := pick(); ok {
-			if e := openIDE(a.global.IDE, s.WorktreePath); e != "" {
-				a.flash = stWarn(e)
-			} else {
-				a.flash = stOK("opened " + s.Branch + " in IDE")
+		if a.scr == scrRepoDetail {
+			items := a.filteredDetailItems()
+			if it, ok := a.selectedDetailItem(items); ok {
+				path := it.Path
+				if it.HasSession {
+					path = it.Session.WorktreePath
+				}
+				if e := openIDE(a.global.IDE, path); e != "" {
+					a.flash = stWarn(e)
+				} else {
+					a.flash = stOK("opened " + it.Branch + " in IDE")
+				}
 			}
 		} else {
-			a.flash = stWarn("no session to open")
+			a.flash = stWarn("enter a repo first")
 		}
-	case "/view":
-		if s, ok := pick(); ok {
-			a.flash = viewFlash(openIDE(a.global.IDE, s.WorktreePath), s)
-		} else {
-			a.flash = stWarn("no session to view")
-		}
+
 	case "/rm", "/remove":
-		if s, ok := pick(); ok {
-			a.confirmRemoveID = s.ID
-		} else {
-			a.flash = stWarn("no session to remove")
+		if a.scr == scrRepoDetail {
+			items := a.filteredDetailItems()
+			if it, ok := a.selectedDetailItem(items); ok && it.HasSession {
+				a.confirmRemoveID = it.Session.ID
+			} else {
+				a.flash = stWarn("no removable session selected")
+			}
+		} else if a.scr == scrHome {
+			entries := a.filteredRepoEntries()
+			if e, ok := a.selectedRepoEntry(entries); ok {
+				_ = config.RemoveRepo(e.Path)
+				a.refreshRepos()
+				a.flash = stOK("removed " + e.Name)
+				a.clampHomeCursor(len(a.repoEntries))
+			} else {
+				a.flash = stWarn("no repo selected")
+			}
 		}
+
 	default:
 		a.flash = stWarn("unknown command: " + verb)
 	}
 	return a, nil
 }
 
-// removeSession kicks off async worktree removal and registry cleanup.
+// ---- session actions (shared by repo detail) --------------------------------
+
 func (a App) removeSession(id string) (tea.Model, tea.Cmd) {
 	a.confirmRemoveID = ""
 	s, ok := a.reg.Get(id)
@@ -344,8 +328,6 @@ func (a App) removeSession(id string) (tea.Model, tea.Cmd) {
 	}
 }
 
-// relaunchSession spawns a fresh agent terminal for an Inactive session,
-// reusing the existing worktree and branch.
 func (a App) relaunchSession(s session.Session) (tea.Model, tea.Cmd) {
 	if a.prov == nil {
 		a.flash = stWarn("no provider configured")
@@ -367,40 +349,42 @@ func (a App) relaunchSession(s session.Session) (tea.Model, tea.Cmd) {
 	}
 }
 
-func viewFlash(ideErr string, s session.Session) string {
-	if ideErr != "" {
-		return stWarn(ideErr)
+func (a App) openTerminal(s session.Session) (tea.Model, tea.Cmd) {
+	a.busyLabel = "Opening terminal…"
+	branch, dir, terminal := s.Branch, s.WorktreePath, a.global.Terminal
+	return a, func() tea.Msg {
+		if err := term.SpawnShell(dir, terminal); err != nil {
+			return openTermResultMsg{branch: branch, err: err.Error()}
+		}
+		return openTermResultMsg{branch: branch}
 	}
-	return stOK("viewing " + s.Branch + " — opened IDE (raise the agent's terminal to interact)")
 }
 
 // ---- view -------------------------------------------------------------------
 
 func (a App) viewHome() string {
 	inner := a.innerWidth()
-	allSessions := a.reg.All()
-	sessions := a.filteredSessions(allSessions)
-	a.clampHomeCursor(len(sessions))
+	entries := a.filteredRepoEntries()
+	a.clampHomeCursor(len(entries))
 
-	header := a.homeHeader(inner, allSessions)
+	header := a.repoListHeader(inner)
 
-	if len(allSessions) == 0 {
-		body := a.emptyState(inner)
-		return a.frame(header, body, "", [][2]string{{"/", "command"}, {"Esc", "exit"}}, true)
+	if len(a.repoEntries) == 0 {
+		body := a.repoEmptyState(inner)
+		keys := [][2]string{{"/add", "add repo"}, {"/", "command"}, {"Ctrl+C", "quit"}}
+		return a.frame(header, body, "", keys, true)
 	}
 
-	if len(sessions) == 0 && a.searchFilter != "" {
-		body := "\n" + "      " + stDimmer.Render("no sessions matching \""+a.searchFilter+"\"")
+	if len(entries) == 0 && a.searchFilter != "" {
+		body := "\n" + "      " + stDimmer.Render("no repos matching \""+a.searchFilter+"\"")
 		keys := [][2]string{{"Esc", "clear search"}}
 		return a.frame(header, body, "", keys, true)
 	}
 
-	rows := make([]string, len(sessions))
-	for i, s := range sessions {
-		rows[i] = a.renderRow(i+1, s, i == a.homeCursor, inner)
+	rows := make([]string, len(entries))
+	for i, e := range entries {
+		rows[i] = a.renderRepoRow(e, i == a.homeCursor, inner)
 	}
-	// Each row is 2 lines; keep the selected row visible within the body region.
-	// Chrome: header (1) + leading blank (1) + padding (1) + cmdbar (3) + keys (1) + flash (1) + status (2) = 11.
 	maxRows := (a.height - 11) / 2
 	if maxRows < 1 {
 		maxRows = 1
@@ -422,69 +406,52 @@ func (a App) viewHome() string {
 
 	body := "\n" + strings.Join(parts, "\n") + "\n"
 
-	ctx := ""
-	keys := [][2]string{{"↑↓", "navigate"}, {"o", "open IDE"}, {"x", "remove"}, {"/", "command"}, {"Esc", "exit"}}
-	if s, ok := a.selectedFrom(sessions); ok && s.State == session.StateInactive {
-		keys = [][2]string{{"↑↓", "navigate"}, {"enter", "relaunch"}, {"o", "open IDE"}, {"x", "remove"}, {"/", "command"}, {"Esc", "exit"}}
-	}
+	keys := [][2]string{{"↑↓", "navigate"}, {"enter", "open repo"}, {"/add", "add repo"}, {"/rm", "remove"}, {"/", "command"}, {"Ctrl+C", "quit"}}
 	if a.searchMode {
-		keys = [][2]string{{"↑↓", "navigate"}, {"Esc", "clear search"}}
-		if s, ok := a.selectedFrom(sessions); ok && s.State == session.StateInactive {
-			keys = [][2]string{{"↑↓", "navigate"}, {"enter", "relaunch"}, {"Esc", "clear search"}}
-		}
+		keys = [][2]string{{"↑↓", "navigate"}, {"enter", "open repo"}, {"Esc", "clear search"}}
 	}
 	if a.cmdMode {
 		keys = [][2]string{{"enter", "run"}, {"Esc", "cancel"}}
 	}
-	if a.confirmRemoveID != "" {
-		keys = [][2]string{{"y", "remove"}, {"n", "cancel"}}
-		if s, ok := a.reg.Get(a.confirmRemoveID); ok {
-			ctx = stInkB.Render("Remove this session?") + stDim.Render(" · "+s.Branch+" (worktree will be deleted)")
-		}
-	}
-	return a.frame(header, body, ctx, keys, true)
+	return a.frame(header, body, "", keys, true)
 }
 
-// homeHeader folds the active-sessions label inline with the fleet wordmark, with
-// the running count right-aligned.
-func (a App) homeHeader(inner int, sessions []session.Session) string {
-	if len(sessions) == 0 {
-		return brand() + stDim.Render("  ·  no active sessions")
-	}
-	running := 0
-	for _, s := range sessions {
+func (a App) repoListHeader(inner int) string {
+	art := logo()
+
+	totalRunning := 0
+	for _, s := range a.reg.All() {
 		if s.State == session.StateRunning {
-			running++
+			totalRunning++
 		}
 	}
-	left := brand() + stDim.Render("  ·  ") + stAccent.Render("●") + " " +
-		stInk.Render("Active sessions ") + stDimmer.Render(fmt.Sprintf("(%d)", len(sessions)))
-	right := stDim.Render(fmt.Sprintf("%d running", running))
-	gap := inner - lipgloss.Width(left) - lipgloss.Width(right)
-	if gap < 1 {
-		gap = 1
+
+	topLine := art[0]
+	if totalRunning > 0 {
+		right := stDim.Render(fmt.Sprintf("%d running", totalRunning))
+		gap := inner - lipgloss.Width(topLine) - lipgloss.Width(right)
+		if gap < 1 {
+			gap = 1
+		}
+		topLine = topLine + strings.Repeat(" ", gap) + right
 	}
-	return left + strings.Repeat(" ", gap) + right
+
+	return topLine + "\n" + art[1] + "\n" + art[2]
 }
 
-func (a App) emptyState(inner int) string {
+func (a App) repoEmptyState(inner int) string {
 	block := lipgloss.JoinVertical(lipgloss.Center,
 		stDimmer.Render("⚇"),
 		"",
-		stDim.Render("No active sessions"),
-		stDimmer.Render("Type ")+stAccent.Render("/new")+stDimmer.Render(" to spin up your first agent worktree."),
+		stDim.Render("No repos added"),
+		stDimmer.Render("Type ")+stAccent.Render("/add")+stDimmer.Render(" to add a repo."),
 	)
 	return lipgloss.NewStyle().Width(inner).Align(lipgloss.Center).
 		Padding(2, 0).Render(block)
 }
 
-// renderRow draws one session as a two-line block (main line + sub-line). The
-// selected row gets a full-color ❯ caret and a bold-accent branch name; every
-// other row is rendered faint so the selection pops by contrast.
-func (a App) renderRow(idx int, s session.Session, selected bool, inner int) string {
+func (a App) renderRepoRow(e repoEntry, selected bool, inner int) string {
 	dim := !selected
-	// faint mutes a style for unselected rows while keeping its hue, so the status
-	// colors still read — just quieter.
 	faint := func(st lipgloss.Style) lipgloss.Style {
 		if dim {
 			return st.Faint(true)
@@ -492,56 +459,64 @@ func (a App) renderRow(idx int, s session.Session, selected bool, inner int) str
 		return st
 	}
 
-	col := stateColor(s.State)
-	bulletColor := col
-	if s.State == session.StateRunning && !a.pulseOn {
-		bulletColor = cDimmer // pulse
-	}
-	bull := faint(lipgloss.NewStyle().Foreground(bulletColor)).Render("●")
-	bdg := faint(lipgloss.NewStyle().Foreground(col)).Render(s.State.Label())
-	idxStr := faint(lipgloss.NewStyle().Foreground(cDimmer)).Render(fmt.Sprintf("%2d", idx))
-
 	nameStyle := lipgloss.NewStyle().Foreground(cInk)
 	if selected {
 		nameStyle = lipgloss.NewStyle().Foreground(cAccent).Bold(true)
 	}
-	nameMax := inner - lipgloss.Width(idxStr) - lipgloss.Width(bdg) - 10
-	if nameMax < 8 {
-		nameMax = 8
-	}
-	name := faint(nameStyle).Render(truncate(s.Branch, nameMax))
 
 	caret := "  "
 	if selected {
 		caret = stAccent.Render("❯") + " "
 	}
-	left := caret + idxStr + " " + bull + " " + name
-	gap := inner - lipgloss.Width(left) - lipgloss.Width(bdg) - 1
+
+	name := faint(nameStyle).Render(e.Name)
+
+	wtLabel := faint(lipgloss.NewStyle().Foreground(cDim)).
+		Render(fmt.Sprintf("%d worktrees", e.WorktreeCount))
+
+	left := caret + name
+	gap := inner - lipgloss.Width(left) - lipgloss.Width(wtLabel) - 1
 	if gap < 1 {
 		gap = 1
 	}
-	line1 := left + strings.Repeat(" ", gap) + bdg
+	line1 := left + strings.Repeat(" ", gap) + wtLabel
 
-	sub := faint(lipgloss.NewStyle().Foreground(cDim)).
-		Render(fmt.Sprintf("%s · %s · %s", s.Base, s.Age(a.now), activityPhrase(s, a.now)))
-	line2 := "      " + sub // sub-line never carries the caret; aligns under the name
+	// Sub-line: path + running count
+	running := a.repoRunningCount(e.Path)
+	sub := faint(lipgloss.NewStyle().Foreground(cDim)).Render(homeTilde(e.Path))
+	var runInfo string
+	if running > 0 {
+		runInfo = faint(lipgloss.NewStyle().Foreground(cRun)).
+			Render(fmt.Sprintf(" · %d running", running))
+	}
+	line2 := "      " + sub + runInfo
 	return line1 + "\n" + line2
 }
 
-// activityPhrase is an honest, hook-derived sub-line (no fabricated filenames):
-// what the session is doing and how long ago it last changed.
+func (a App) repoRunningCount(repoPath string) int {
+	count := 0
+	for _, s := range a.reg.All() {
+		if s.RepoDir == repoPath && s.State == session.StateRunning {
+			count++
+		}
+	}
+	return count
+}
+
+// ---- shared helpers ---------------------------------------------------------
+
+// activityPhrase describes what a session is doing.
 func activityPhrase(s session.Session, now time.Time) string {
 	switch s.State {
 	case session.StateRunning:
 		return "working…"
-	case session.StateFinished:
+	case session.StateIdle:
 		return "idle " + s.ActivityAge(now) + " · ready to review"
 	default:
-		return "ended (terminal closed)"
+		return "ended (session closed)"
 	}
 }
 
-// truncate shortens s to at most n display columns, adding an ellipsis.
 func truncate(s string, n int) string {
 	if n <= 1 {
 		return "…"

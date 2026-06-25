@@ -7,6 +7,15 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// logo renders the block-letter "fleet" art with a depth gradient (bright top → dim bottom).
+func logo() [3]string {
+	return [3]string{
+		lipgloss.NewStyle().Foreground(cLogoTop).Render("█▀▀ █   █▀▀ █▀▀ ▀█▀"),
+		lipgloss.NewStyle().Foreground(cLogoMid).Render("█▀  █   █▀  █▀   █"),
+		lipgloss.NewStyle().Foreground(cLogoBot).Render("▀   ▀▀▀ ▀▀▀ ▀▀▀  ▀"),
+	}
+}
+
 // wizHeader renders the "<Label>   <title> · step N of M" line shared by the
 // wizard and onboarding.
 func wizHeader(label, title string, step, total int) string {

@@ -10,23 +10,6 @@ Supports:
 1. [Claude Code](https://claude.com/claude-code) (more providers planned — the
    core is provider-agnostic)
 
-```
-▌ fleet  ~/Documents/gitlab/platform-server
-
-● Active sessions (3)                                    1 running
-
-▌  1 ● task/SP-12392-build-navigation-bar               Running
-        main · 4m · working…
-   2 ● fix/SP-12222-fix-bug-in-home-page                Finished
-        main · 1m · idle 1m ago · ready to review
-   3 ● chore/SP-12001-bump-deps                         Inactive
-        main · 2h · ended (terminal closed)
-
-› Type a command…  try /new
-─────────────────────────────────────────────────────────────────
-Viewing active sessions · task/SP-12392…   ↑↓ navigate  enter view  o open IDE  x remove  / command  Esc exit
-```
-
 Type `/new`, answer the wizard (name → directory → base branch → setup →
 review), and `fleet` creates the worktree and launches the agent **in a new
 terminal window**. `fleet` keeps your terminal and tracks each agent's state —
@@ -53,6 +36,7 @@ curl -fsSL https://raw.githubusercontent.com/davidng10/command-center/main/insta
 ```
 
 Options:
+
 - **Specific version:** `VERSION=v1.0.0 curl -fsSL … | sh`
 - **Custom location:** `BIN_DIR=/usr/local/bin curl -fsSL … | sh`
 - **From a cloned repo:** `make install` (or `./build.sh && ./install.sh`)
@@ -62,10 +46,7 @@ If `~/.local/bin` isn't on your PATH, the script tells you the line to add.
 
 On first launch `fleet` runs a one-time **onboarding**: just pick your provider.
 Status tracking is automatic and needs no setup — `fleet` injects its status
-hooks **only into the sessions it launches** (via `claude --settings`), so your
-global `~/.claude/settings.json` is never modified and unrelated Claude Code
-sessions never see them. (Upgrading from an older `fleet`? It removes the global
-hooks a previous version installed, automatically, on next launch.)
+hooks **only into the sessions it launches**.
 
 ### Requirements at runtime
 
@@ -105,14 +86,14 @@ fleet --version
 
 In the TUI the command bar (press `/`) runs `/commands`:
 
-| Command         | Hotkey      | Action                                       |
-| --------------- | ----------- | -------------------------------------------- |
-| `/new [branch]` | `/` then type | start the new-session wizard               |
-| `/view <id>`    | `enter`     | open the session's worktree in your IDE      |
-| `/open <id>`    | `o`         | open the worktree in your IDE                |
-| `/rm <id>`      | `x`         | remove the worktree + session (with confirm) |
-| `/setup`        | —           | re-run onboarding                            |
-| `/quit`         | `Esc`       | exit (sessions keep running in their terminals) |
+| Command         | Hotkey        | Action                                          |
+| --------------- | ------------- | ----------------------------------------------- |
+| `/new [branch]` | `/` then type | start the new-session wizard                    |
+| `/view <id>`    | `enter`       | open the session's worktree in your IDE         |
+| `/open <id>`    | `o`           | open the worktree in your IDE                   |
+| `/rm <id>`      | `x`           | remove the worktree + session (with confirm)    |
+| `/setup`        | —             | re-run onboarding                               |
+| `/quit`         | `Esc`         | exit (sessions keep running in their terminals) |
 
 `id` defaults to the selected row when omitted.
 
@@ -160,7 +141,7 @@ worktree is usable. The wizard's setup picker pre-selects in order:
 2. **your last choice for this repo** (from `prefs.json`), then
 3. auto-detection from the lockfile (`pnpm install`, `npm ci`, … — JS only).
 
-Your choice (including *Skip*) is remembered per repo. A legacy
+Your choice (including _Skip_) is remembered per repo. A legacy
 `~/.config/fleet/setups.json` from older versions is migrated into `prefs.json`
 automatically on first run.
 
@@ -174,11 +155,11 @@ the agent with `claude --settings ~/.config/fleet/claude/settings.json`. The hoo
 therefore fire **only for the sessions fleet launches** — never for unrelated
 Claude Code sessions, and never by modifying your global `~/.claude/settings.json`:
 
-| Claude hook event  | `fleet hook …`  | state          |
-| ------------------ | --------------- | -------------- |
-| `UserPromptSubmit` | `running`       | **Running**    |
-| `Stop`             | `finished`      | **Finished**   |
-| `SessionEnd`       | `inactive`      | **Inactive**   |
+| Claude hook event  | `fleet hook …` | state        |
+| ------------------ | -------------- | ------------ |
+| `UserPromptSubmit` | `running`      | **Running**  |
+| `Stop`             | `finished`     | **Finished** |
+| `SessionEnd`       | `inactive`     | **Inactive** |
 
 `fleet hook <state>` reads the hook payload on stdin, maps `cwd` → worktree →
 session (resolving symlinks, so a hook's canonical cwd still matches), and

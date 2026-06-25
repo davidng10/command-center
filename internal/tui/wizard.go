@@ -59,7 +59,8 @@ type wizardModel struct {
 	prov   provider.Provider
 	global config.Global
 
-	step wizStep
+	step            wizStep
+	repoPreSelected bool // true when launched from repo detail (skip dir step, base→name order)
 
 	nameInput textinput.Model
 
@@ -123,6 +124,36 @@ func newWizard(prefill string, prov provider.Provider, global config.Global) *wi
 	return w
 }
 
+// newWizardForRepo creates a wizard with the repo pre-selected, starting at the
+// base branch step. Step order becomes: base → name → setup → confirm.
+func newWizardForRepo(repo worktree.RepoContext, cfg config.Config, prov provider.Provider, global config.Global) *wizardModel {
+	ni := textinput.New()
+	ni.Prompt = stAccent.Render("› ")
+	ni.Placeholder = "task/SP-1234-login-fix"
+	ni.PlaceholderStyle = stDimmer
+	ni.TextStyle = stInk
+	ni.Cursor.Style = stCaret
+
+	ci := textinput.New()
+	ci.Prompt = stAccent.Render("› ")
+	ci.Placeholder = "runs in the new worktree — blank to skip"
+	ci.PlaceholderStyle = stDimmer
+	ci.TextStyle = stInk
+	ci.Cursor.Style = stCaret
+
+	w := &wizardModel{
+		prov: prov, global: global,
+		nameInput: ni, customInput: ci,
+		repoPreSelected: true,
+		repo:            repo,
+		cfg:             cfg,
+		dirLabel:        homeTilde(repo.Root),
+		step:            wsBase,
+	}
+	w.baseItems = buildBaseItems(w.repo, w.cfg)
+	return w
+}
+
 // ---- update -----------------------------------------------------------------
 
 func (a App) updateWizard(m tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -165,22 +196,42 @@ func (a App) wizBack() App {
 		w.customizing = false
 		return a
 	}
-	switch w.step {
-	case wsName:
-		a.scr = scrHome
-		a.wiz = nil
-	case wsDir:
-		w.step = wsName
-		w.nameInput.Focus()
-	case wsBase:
-		w.step = wsDir
-	case wsSetup:
-		w.step = wsBase
-	case wsConfirm:
-		if w.cfg.Install {
-			w.step = wsSetup
-		} else {
+	if w.repoPreSelected {
+		switch w.step {
+		case wsBase:
+			a.scr = scrRepoDetail
+			a.wiz = nil
+		case wsName:
 			w.step = wsBase
+		case wsSetup:
+			w.step = wsName
+			w.nameInput.Focus()
+		case wsConfirm:
+			if w.cfg.Install {
+				w.step = wsSetup
+			} else {
+				w.step = wsName
+				w.nameInput.Focus()
+			}
+		}
+	} else {
+		switch w.step {
+		case wsName:
+			a.scr = scrHome
+			a.wiz = nil
+		case wsDir:
+			w.step = wsName
+			w.nameInput.Focus()
+		case wsBase:
+			w.step = wsDir
+		case wsSetup:
+			w.step = wsBase
+		case wsConfirm:
+			if w.cfg.Install {
+				w.step = wsSetup
+			} else {
+				w.step = wsBase
+			}
 		}
 	}
 	return a
@@ -194,8 +245,12 @@ func (a App) updateWizName(m tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		w.branch = w.nameInput.Value()
 		w.nameInput.Blur()
-		w.step = wsDir
-		w.dirCursor = 0
+		if w.repoPreSelected {
+			a.enterSetupOrConfirm()
+		} else {
+			w.step = wsDir
+			w.dirCursor = 0
+		}
 		return a, nil
 	}
 	var cmd tea.Cmd
@@ -287,7 +342,12 @@ func (a App) updateWizBase(m tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case m.Type == tea.KeyEnter:
 		if w.baseCursor < len(items) {
 			w.base = items[w.baseCursor].Base
-			a.enterSetupOrConfirm()
+			if w.repoPreSelected {
+				w.step = wsName
+				w.nameInput.Focus()
+			} else {
+				a.enterSetupOrConfirm()
+			}
 		}
 	case m.Type == tea.KeyBackspace:
 		if w.baseFilter != "" {

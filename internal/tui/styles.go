@@ -20,6 +20,10 @@ var (
 	cInfo       = lipgloss.Color("#38bdf8")
 	cInact      = lipgloss.Color("#9a9aa8")
 	cSel        = lipgloss.Color("#1d1b2e")
+
+	cLogoTop = lipgloss.Color("#b4befe")
+	cLogoMid = lipgloss.Color("#8b8ff7")
+	cLogoBot = lipgloss.Color("#5b5f8f")
 )
 
 var (
@@ -38,7 +42,7 @@ func stateColor(st session.State) lipgloss.Color {
 	switch st {
 	case session.StateRunning:
 		return cRun
-	case session.StateFinished:
+	case session.StateIdle:
 		return cDone
 	default:
 		return cInact

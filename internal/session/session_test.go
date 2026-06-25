@@ -8,7 +8,7 @@ import (
 )
 
 func TestStateWireRoundTrip(t *testing.T) {
-	for _, st := range []State{StateRunning, StateFinished, StateInactive} {
+	for _, st := range []State{StateRunning, StateIdle, StateInactive} {
 		data, err := json.Marshal(st)
 		if err != nil {
 			t.Fatal(err)
@@ -43,7 +43,7 @@ func TestRegistryRoundTrip(t *testing.T) {
 
 	older := time.Now().Add(-time.Hour)
 	newer := time.Now()
-	if err := r.Add(Session{ID: "old", Branch: "b1", WorktreePath: "/wt/a", State: StateFinished, CreatedAt: older}); err != nil {
+	if err := r.Add(Session{ID: "old", Branch: "b1", WorktreePath: "/wt/a", State: StateIdle, CreatedAt: older}); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.Add(Session{ID: "new", Branch: "b2", WorktreePath: "/wt/b", State: StateRunning, CreatedAt: newer}); err != nil {

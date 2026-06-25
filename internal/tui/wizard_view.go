@@ -23,12 +23,12 @@ func (a App) viewWizard() string {
 
 	switch w.step {
 	case wsName:
-		body = wizHeader("New session", "Name", 1, w.total()) + "\n\n" +
+		body = wizHeader("New worktree", "Branch name", w.stepNumber(), w.total()) + "\n\n" +
 			stInk.Render("Name this session / branch") + "\n" +
 			stDimmer.Render("however your team names branches — e.g. task/SP-1234-login-fix") + "\n\n" +
 			"  " + w.nameInput.View()
-		ctx = stInkB.Render("New session") + stDim.Render(" · name the branch")
-		keys = [][2]string{{"type", "branch name"}, {"enter", "next"}, {"Esc", "cancel"}}
+		ctx = stInkB.Render("New worktree") + stDim.Render(" · name the branch")
+		keys = [][2]string{{"type", "branch name"}, {"enter", "next"}, {"Esc", "back"}}
 
 	case wsDir:
 		items := w.dirDisplay()
@@ -40,12 +40,12 @@ func (a App) viewWizard() string {
 		if len(lines) > 0 {
 			list = optionList(lines, w.dirCursor, maxRows)
 		}
-		body = wizHeader("New session", "Directory", 2, w.total()) + "\n" +
+		body = wizHeader("New worktree", "Directory", w.stepNumber(), w.total()) + "\n" +
 			crumb(w.stack) + "\n" +
 			stInk.Render("Select the directory to build the worktree in") + "\n" +
 			stDimmer.Render("navigate folders · open a ") + stAccent.Render("git") + stDimmer.Render(" repo to select it as the worktree source") + "\n\n" +
 			list + "\n" + filterBar(inner, w.dirFilter, "type to search this folder")
-		ctx = stInkB.Render("New session") + stDim.Render(" · choose directory")
+		ctx = stInkB.Render("New worktree") + stDim.Render(" · choose directory")
 		keys = [][2]string{{"↑↓", "navigate"}, {"⏎", dirEnterLabel(items, w.dirCursor)}, {"←", "up"}, {"type", "search"}, {"Esc", "back"}}
 
 	case wsBase:
@@ -58,16 +58,16 @@ func (a App) viewWizard() string {
 		if len(lines) > 0 {
 			list = optionList(lines, w.baseCursor, maxRows)
 		}
-		body = wizHeader("New session", "Base branch", 3, w.total()) + "\n\n" +
+		body = wizHeader("New worktree", "Base branch", w.stepNumber(), w.total()) + "\n\n" +
 			stInk.Render("Select base branch") + "\n" +
 			stDim.Render(fmt.Sprintf("%s · %d branches · the branch your worktree forks from", w.repo.Name, len(w.baseItems))) + "\n\n" +
 			list + "\n" + filterBar(inner, w.baseFilter, "search branches")
-		ctx = stInkB.Render("New session") + stDim.Render(" · choose base branch")
+		ctx = stInkB.Render("New worktree") + stDim.Render(" · choose base branch")
 		keys = [][2]string{{"↑↓", "navigate"}, {"type", "search"}, {"⏎", "select"}, {"Esc", "back"}}
 
 	case wsSetup:
 		if w.customizing {
-			body = wizHeader("New session", "Setup", 4, w.total()) + "\n\n" +
+			body = wizHeader("New worktree", "Setup", w.stepNumber(), w.total()) + "\n\n" +
 				stInk.Render("Custom setup command") + "\n" +
 				stDimmer.Render("runs in the new worktree — blank to skip") + "\n\n" +
 				"  " + w.customInput.View()
@@ -82,24 +82,30 @@ func (a App) viewWizard() string {
 			if len(lines) > 0 {
 				list = optionList(lines, w.setupCursor, maxRows)
 			}
-			body = wizHeader("New session", "Setup", 4, w.total()) + "\n\n" +
+			body = wizHeader("New worktree", "Setup", w.stepNumber(), w.total()) + "\n\n" +
 				stInk.Render("Setup command") + "\n" +
 				stDim.Render("runs once in the new worktree before launch") + "\n\n" +
 				list + "\n" + filterBar(inner, w.setupFilter, "filter")
 			keys = [][2]string{{"↑↓", "navigate"}, {"type", "filter"}, {"⏎", "select"}, {"Esc", "back"}}
 		}
-		ctx = stInkB.Render("New session") + stDim.Render(" · setup command")
+		ctx = stInkB.Render("New worktree") + stDim.Render(" · setup command")
 
 	case wsConfirm:
 		body = a.viewConfirm(inner)
-		ctx = stInkB.Render("New session") + stDim.Render(" · review")
+		ctx = stInkB.Render("New worktree") + stDim.Render(" · review")
 		keys = [][2]string{{"enter", "create"}, {"Esc", "back"}}
 		if a.busyLabel != "" {
 			keys = nil
 		}
 	}
 
-	return a.frame(a.brandHeader(inner), body, ctx, keys, false)
+	header := a.brandHeader(inner)
+	if w.repoPreSelected {
+		header = stDim.Render("repos") + stDimmer.Render(" › ") +
+			stDim.Render(w.repo.Name) + stDimmer.Render(" › ") +
+			stInkB.Render("new worktree")
+	}
+	return a.frame(header, body, ctx, keys, false)
 }
 
 func (a App) viewConfirm(inner int) string {
@@ -136,14 +142,46 @@ func (a App) viewConfirm(inner int) string {
 		ask = stAccent.Render("Creating worktree and launching the agent…")
 		yn = ""
 	}
-	return wizHeader("New session", "Review", 5, w.total()) + "\n\n" + table + "\n" + ask + "\n" + yn
+	return wizHeader("New worktree", "Review", w.stepNumber(), w.total()) + "\n\n" + table + "\n" + ask + "\n" + yn
 }
 
 func (w *wizardModel) total() int {
-	if w.repo.Root != "" && !w.cfg.Install {
-		return 4
+	steps := 5 // name + dir + base + setup + confirm
+	if w.repoPreSelected {
+		steps-- // no dir step
 	}
-	return 5
+	if w.repo.Root != "" && !w.cfg.Install {
+		steps-- // no setup step
+	}
+	return steps
+}
+
+func (w *wizardModel) stepNumber() int {
+	if w.repoPreSelected {
+		switch w.step {
+		case wsBase:
+			return 1
+		case wsName:
+			return 2
+		case wsSetup:
+			return 3
+		case wsConfirm:
+			return w.total()
+		}
+	}
+	switch w.step {
+	case wsName:
+		return 1
+	case wsDir:
+		return 2
+	case wsBase:
+		return 3
+	case wsSetup:
+		return 4
+	case wsConfirm:
+		return w.total()
+	}
+	return 1
 }
 
 func crumb(stack []string) string {
